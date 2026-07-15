@@ -9,11 +9,11 @@
   --border: rgba(11, 11, 11, 0.10);
   --neutral-mid: #f0efec;
 
-  /* 日本の相場慣習に合わせ diverging pair を 上昇=赤 / 下落=青 として割り当て */
-  --up: #e34948;
-  --down: #2a78d6;
-  --up-wash: rgba(227, 73, 72, 0.10);
-  --down-wash: rgba(42, 120, 214, 0.10);
+  /* 上昇要因=青 / 下落要因=赤 として割り当て */
+  --up: #2a78d6;
+  --down: #e34948;
+  --up-wash: rgba(42, 120, 214, 0.10);
+  --down-wash: rgba(227, 73, 72, 0.10);
   --series-blue: #2a78d6;
 }
 
@@ -29,10 +29,10 @@
     --border: rgba(255, 255, 255, 0.10);
     --neutral-mid: #383835;
 
-    --up: #e66767;
-    --down: #3987e5;
-    --up-wash: rgba(230, 103, 103, 0.14);
-    --down-wash: rgba(57, 135, 229, 0.14);
+    --up: #3987e5;
+    --down: #e66767;
+    --up-wash: rgba(57, 135, 229, 0.14);
+    --down-wash: rgba(230, 103, 103, 0.14);
     --series-blue: #3987e5;
   }
 }
@@ -47,10 +47,10 @@
   --baseline: #383835;
   --border: rgba(255, 255, 255, 0.10);
   --neutral-mid: #383835;
-  --up: #e66767;
-  --down: #3987e5;
-  --up-wash: rgba(230, 103, 103, 0.14);
-  --down-wash: rgba(57, 135, 229, 0.14);
+  --up: #3987e5;
+  --down: #e66767;
+  --up-wash: rgba(57, 135, 229, 0.14);
+  --down-wash: rgba(230, 103, 103, 0.14);
   --series-blue: #3987e5;
 }
 
@@ -64,10 +64,10 @@
   --baseline: #c3c2b7;
   --border: rgba(11, 11, 11, 0.10);
   --neutral-mid: #f0efec;
-  --up: #e34948;
-  --down: #2a78d6;
-  --up-wash: rgba(227, 73, 72, 0.10);
-  --down-wash: rgba(42, 120, 214, 0.10);
+  --up: #2a78d6;
+  --down: #e34948;
+  --up-wash: rgba(42, 120, 214, 0.10);
+  --down-wash: rgba(227, 73, 72, 0.10);
   --series-blue: #2a78d6;
 }
 
