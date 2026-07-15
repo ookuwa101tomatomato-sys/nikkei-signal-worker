@@ -7,13 +7,15 @@ const NIKKEI_TICKER = "^N225";
 const DOW_TICKER = "^DJI";
 const SP500_TICKER = "^GSPC";
 const FX_TICKER = "JPY=X";
+const VIX_TICKER = "^VIX";
 
 const WEIGHTS = {
-  trend: 0.30,
-  rsi: 0.15,
-  macd: 0.20,
-  us_market: 0.20,
-  fx: 0.15,
+  trend: 0.28,
+  rsi: 0.13,
+  macd: 0.18,
+  us_market: 0.17,
+  fx: 0.14,
+  vix: 0.10,
 };
 
 function clip(value, lo = -100, hi = 100) {
@@ -211,6 +213,27 @@ function scoreFx(fxCloses) {
   return component("fx", "為替(ドル円)", score, detail);
 }
 
+function scoreVix(vixCloses) {
+  const vixChg = pctChangeLast(vixCloses);
+  const latestVix = last(vixCloses);
+
+  // VIX上昇(恐怖の高まり)は弱気要因、下落は強気要因として符号を反転
+  // VIXは日々の変動率自体が大きい(平常時でも±5%程度動く)ため、他指標より緩やかな係数にする
+  let score = -vixChg * 6;
+  if (latestVix >= 30) score -= 20;
+  else if (latestVix >= 25) score -= 10;
+  else if (latestVix <= 15) score += 10;
+
+  let state;
+  if (latestVix >= 30) state = "高水準(強い警戒)";
+  else if (latestVix >= 20) state = "やや高水準";
+  else if (latestVix <= 15) state = "低水準(平常)";
+  else state = "中立水準";
+
+  const detail = `VIX ${latestVix.toFixed(1)}(前日比${vixChg >= 0 ? "+" : ""}${vixChg.toFixed(2)}%) — ${state}`;
+  return component("vix", "VIX(恐怖指数)", score, detail);
+}
+
 function labelForScore(score) {
   if (score >= 40) return ["強気(上昇優勢)", "up_strong"];
   if (score >= 15) return ["やや強気", "up_weak"];
@@ -220,11 +243,12 @@ function labelForScore(score) {
 }
 
 export async function computeSignal() {
-  const [nikkei, dow, sp, fx] = await Promise.all([
+  const [nikkei, dow, sp, fx, vix] = await Promise.all([
     fetchChart(NIKKEI_TICKER, { range: "8mo" }),
     fetchChart(DOW_TICKER, { range: "5d" }),
     fetchChart(SP500_TICKER, { range: "5d" }),
     fetchChart(FX_TICKER, { range: "5d" }),
+    fetchChart(VIX_TICKER, { range: "5d" }),
   ]);
 
   const closes = nikkei.closes;
@@ -234,6 +258,7 @@ export async function computeSignal() {
     scoreMacd(closes),
     scoreUsMarket(dow.closes, sp.closes),
     scoreFx(fx.closes),
+    scoreVix(vix.closes),
   ];
 
   let composite = 0;
@@ -278,11 +303,12 @@ function findIndexUpTo(dates, dateStr) {
 }
 
 export async function computeHistory(days = 30) {
-  const [nikkei, dow, sp, fx] = await Promise.all([
+  const [nikkei, dow, sp, fx, vix] = await Promise.all([
     fetchChart(NIKKEI_TICKER, { range: "8mo" }),
     fetchChart(DOW_TICKER, { range: "6mo" }),
     fetchChart(SP500_TICKER, { range: "6mo" }),
     fetchChart(FX_TICKER, { range: "6mo" }),
+    fetchChart(VIX_TICKER, { range: "6mo" }),
   ]);
 
   const closes = nikkei.closes;
@@ -299,7 +325,8 @@ export async function computeHistory(days = 30) {
     const dowIdx = findIndexUpTo(dow.dates, d);
     const spIdx = findIndexUpTo(sp.dates, d);
     const fxIdx = findIndexUpTo(fx.dates, d);
-    if (dowIdx < 1 || spIdx < 1 || fxIdx < 1) continue;
+    const vixIdx = findIndexUpTo(vix.dates, d);
+    if (dowIdx < 1 || spIdx < 1 || fxIdx < 1 || vixIdx < 1) continue;
 
     const components = [
       scoreTrend(sliceCloses),
@@ -307,6 +334,7 @@ export async function computeHistory(days = 30) {
       scoreMacd(sliceCloses),
       scoreUsMarket(dow.closes.slice(0, dowIdx + 1), sp.closes.slice(0, spIdx + 1)),
       scoreFx(fx.closes.slice(0, fxIdx + 1)),
+      scoreVix(vix.closes.slice(0, vixIdx + 1)),
     ];
 
     let composite = 0;
@@ -336,11 +364,12 @@ export async function computeCrashWindow(centerDateStr, beforeDays = 7, afterDay
   const period2 = centerUnix + (afterDays + 10) * DAY;
   const fxPeriod1 = centerUnix - 60 * DAY;
 
-  const [nikkei, dow, sp, fx] = await Promise.all([
+  const [nikkei, dow, sp, fx, vix] = await Promise.all([
     fetchChart(NIKKEI_TICKER, { period1: nikkeiPeriod1, period2 }),
     fetchChart(DOW_TICKER, { period1: fxPeriod1, period2 }),
     fetchChart(SP500_TICKER, { period1: fxPeriod1, period2 }),
     fetchChart(FX_TICKER, { period1: fxPeriod1, period2 }),
+    fetchChart(VIX_TICKER, { period1: fxPeriod1, period2 }),
   ]);
 
   const closes = nikkei.closes;
@@ -360,7 +389,8 @@ export async function computeCrashWindow(centerDateStr, beforeDays = 7, afterDay
     const dowIdx = findIndexUpTo(dow.dates, d);
     const spIdx = findIndexUpTo(sp.dates, d);
     const fxIdx = findIndexUpTo(fx.dates, d);
-    if (dowIdx < 1 || spIdx < 1 || fxIdx < 1) continue;
+    const vixIdx = findIndexUpTo(vix.dates, d);
+    if (dowIdx < 1 || spIdx < 1 || fxIdx < 1 || vixIdx < 1) continue;
 
     const components = [
       scoreTrend(sliceCloses),
@@ -368,6 +398,7 @@ export async function computeCrashWindow(centerDateStr, beforeDays = 7, afterDay
       scoreMacd(sliceCloses),
       scoreUsMarket(dow.closes.slice(0, dowIdx + 1), sp.closes.slice(0, spIdx + 1)),
       scoreFx(fx.closes.slice(0, fxIdx + 1)),
+      scoreVix(vix.closes.slice(0, vixIdx + 1)),
     ];
 
     let composite = 0;
