@@ -90,8 +90,13 @@ function component(key, label, score, detail) {
   return { key, label, score: Math.round(clipped * 10) / 10, detail, polarity: polarityFromScore(clipped), weight: WEIGHTS[key] };
 }
 
-async function fetchChart(ticker, range) {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=${range}&interval=1d`;
+async function fetchChart(ticker, params) {
+  // params は { range: "8mo" } または { period1: unix, period2: unix } のどちらか
+  const qs =
+    "range" in params
+      ? `range=${params.range}`
+      : `period1=${params.period1}&period2=${params.period2}`;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?${qs}&interval=1d`;
   const res = await fetch(url, {
     headers: {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
@@ -216,10 +221,10 @@ function labelForScore(score) {
 
 export async function computeSignal() {
   const [nikkei, dow, sp, fx] = await Promise.all([
-    fetchChart(NIKKEI_TICKER, "8mo"),
-    fetchChart(DOW_TICKER, "5d"),
-    fetchChart(SP500_TICKER, "5d"),
-    fetchChart(FX_TICKER, "5d"),
+    fetchChart(NIKKEI_TICKER, { range: "8mo" }),
+    fetchChart(DOW_TICKER, { range: "5d" }),
+    fetchChart(SP500_TICKER, { range: "5d" }),
+    fetchChart(FX_TICKER, { range: "5d" }),
   ]);
 
   const closes = nikkei.closes;
@@ -274,10 +279,10 @@ function findIndexUpTo(dates, dateStr) {
 
 export async function computeHistory(days = 30) {
   const [nikkei, dow, sp, fx] = await Promise.all([
-    fetchChart(NIKKEI_TICKER, "8mo"),
-    fetchChart(DOW_TICKER, "6mo"),
-    fetchChart(SP500_TICKER, "6mo"),
-    fetchChart(FX_TICKER, "6mo"),
+    fetchChart(NIKKEI_TICKER, { range: "8mo" }),
+    fetchChart(DOW_TICKER, { range: "6mo" }),
+    fetchChart(SP500_TICKER, { range: "6mo" }),
+    fetchChart(FX_TICKER, { range: "6mo" }),
   ]);
 
   const closes = nikkei.closes;
@@ -320,9 +325,109 @@ export async function computeHistory(days = 30) {
   return history;
 }
 
+function dateToUnix(dateStr) {
+  return Math.floor(new Date(dateStr + "T00:00:00Z").getTime() / 1000);
+}
+
+export async function computeCrashWindow(centerDateStr, beforeDays = 7, afterDays = 7) {
+  const DAY = 24 * 3600;
+  const centerUnix = dateToUnix(centerDateStr);
+  const nikkeiPeriod1 = centerUnix - 200 * DAY; // SMA75計算分の余裕を持って過去に遡る
+  const period2 = centerUnix + (afterDays + 10) * DAY;
+  const fxPeriod1 = centerUnix - 60 * DAY;
+
+  const [nikkei, dow, sp, fx] = await Promise.all([
+    fetchChart(NIKKEI_TICKER, { period1: nikkeiPeriod1, period2 }),
+    fetchChart(DOW_TICKER, { period1: fxPeriod1, period2 }),
+    fetchChart(SP500_TICKER, { period1: fxPeriod1, period2 }),
+    fetchChart(FX_TICKER, { period1: fxPeriod1, period2 }),
+  ]);
+
+  const closes = nikkei.closes;
+  const dates = nikkei.dates;
+
+  const centerIdx = findIndexUpTo(dates, centerDateStr);
+  if (centerIdx < 75) throw new Error("指定日周辺のデータが不足しています");
+
+  const startIdx = Math.max(75, centerIdx - beforeDays);
+  const endIdx = Math.min(dates.length - 1, centerIdx + afterDays);
+
+  const rows = [];
+  for (let i = startIdx; i <= endIdx; i++) {
+    const d = dates[i];
+    const sliceCloses = closes.slice(0, i + 1);
+
+    const dowIdx = findIndexUpTo(dow.dates, d);
+    const spIdx = findIndexUpTo(sp.dates, d);
+    const fxIdx = findIndexUpTo(fx.dates, d);
+    if (dowIdx < 1 || spIdx < 1 || fxIdx < 1) continue;
+
+    const components = [
+      scoreTrend(sliceCloses),
+      scoreRsi(sliceCloses),
+      scoreMacd(sliceCloses),
+      scoreUsMarket(dow.closes.slice(0, dowIdx + 1), sp.closes.slice(0, spIdx + 1)),
+      scoreFx(fx.closes.slice(0, fxIdx + 1)),
+    ];
+
+    let composite = 0;
+    for (const c of components) composite += c.score * WEIGHTS[c.key];
+    composite = clip(composite);
+    const [label, polarity] = labelForScore(composite);
+
+    const changePct = i > 0 ? (closes[i] / closes[i - 1] - 1) * 100 : null;
+
+    rows.push({
+      date: d,
+      score: Math.round(composite * 10) / 10,
+      label,
+      polarity,
+      close: Math.round(closes[i] * 100) / 100,
+      change_pct: changePct !== null ? Math.round(changePct * 100) / 100 : null,
+      is_center: i === centerIdx,
+    });
+  }
+  return rows;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+
+    if (url.pathname === "/api/crash") {
+      const date = url.searchParams.get("date") || "";
+      const before = Math.max(1, Math.min(30, parseInt(url.searchParams.get("before") || "7", 10) || 7));
+      const after = Math.max(1, Math.min(30, parseInt(url.searchParams.get("after") || "7", 10) || 7));
+
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return new Response(JSON.stringify({ ok: false, error: "date は YYYY-MM-DD 形式で指定してください" }), {
+          status: 400,
+          headers: { "content-type": "application/json; charset=utf-8" },
+        });
+      }
+
+      const cache = caches.default;
+      const cacheKey = new Request(url.origin + `/api/crash-cache-key?date=${date}&before=${before}&after=${after}`, request);
+      const cached = await cache.match(cacheKey);
+      if (cached) return cached;
+
+      try {
+        const rows = await computeCrashWindow(date, before, after);
+        const response = new Response(JSON.stringify({ ok: true, date, before, after, rows }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            "Cache-Control": "public, max-age=86400",
+          },
+        });
+        ctx.waitUntil(cache.put(cacheKey, response.clone()));
+        return response;
+      } catch (err) {
+        return new Response(JSON.stringify({ ok: false, error: String(err.message || err) }), {
+          status: 502,
+          headers: { "content-type": "application/json; charset=utf-8" },
+        });
+      }
+    }
 
     if (url.pathname === "/api/history") {
       const days = Math.max(5, Math.min(90, parseInt(url.searchParams.get("days") || "30", 10) || 30));

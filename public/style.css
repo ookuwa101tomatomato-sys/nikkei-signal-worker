@@ -253,6 +253,63 @@ html, body {
   display: block;
   touch-action: pan-y;
 }
+/* ---- Crash analysis ---- */
+.crash-select {
+  width: 100%;
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--page-plane);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin-bottom: 12px;
+}
+
+.crash-status {
+  font-size: 12px;
+  color: var(--text-muted);
+  min-height: 16px;
+  margin: 8px 0 0;
+}
+
+.crash-table {
+  display: flex;
+  flex-direction: column;
+  margin-top: 8px;
+  border-top: 1px solid var(--gridline);
+}
+
+.crash-row {
+  display: grid;
+  grid-template-columns: 88px 60px 52px 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--gridline);
+}
+
+.crash-row-center {
+  background: var(--page-plane);
+  font-weight: 700;
+  border-radius: 8px;
+}
+
+.crash-date { color: var(--text-secondary); }
+
+.crash-chg.up { color: var(--up); }
+.crash-chg.down { color: var(--down); }
+
+.crash-score.up { color: var(--up); }
+.crash-score.down { color: var(--down); }
+.crash-score.neutral { color: var(--text-muted); }
+
+.crash-label.up { color: var(--up); }
+.crash-label.down { color: var(--down); }
+.crash-label.neutral { color: var(--text-muted); }
+
 /* ---- Breakdown ---- */
 .breakdown-list {
   display: flex;

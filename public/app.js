@@ -20,7 +20,6 @@
   const ARROW = { up: "▲", down: "▼", neutral: "●" };
 
   let lastPriceSeries = null;
-  let lastHistory = null;
 
   function fmtNumber(n, digits) {
     return Number(n).toLocaleString("ja-JP", {
@@ -246,49 +245,53 @@
     hit.addEventListener("pointerleave", handleLeave);
   }
 
-  function drawHistoryChart(history) {
-    lastHistory = history;
-    const svg = document.getElementById("historyChart");
-    const wrap = document.getElementById("historyWrap");
+  const chartRegistry = {};
+
+  function drawDivergingChart(svgId, wrapId, tooltipId, points, options = {}) {
+    chartRegistry[svgId] = { points, wrapId, tooltipId, options };
+
+    const svg = document.getElementById(svgId);
+    const wrap = document.getElementById(wrapId);
     const width = wrap.clientWidth || 320;
-    const height = 140;
+    const height = options.height || 140;
     const pad = { top: 12, right: 8, bottom: 8, left: 8 };
 
     svg.setAttribute("viewBox", "0 0 " + width + " " + height);
     svg.innerHTML = "";
 
-    if (!history || history.length < 2) return;
+    if (!points || points.length < 2) return;
 
     const yMin = -100;
     const yMax = 100;
     const innerW = width - pad.left - pad.right;
     const innerH = height - pad.top - pad.bottom;
 
-    const xScale = (i) => pad.left + (i / (history.length - 1)) * innerW;
+    const xScale = (i) => pad.left + (i / (points.length - 1)) * innerW;
     const yScale = (v) => pad.top + innerH - ((v - yMin) / (yMax - yMin)) * innerH;
     const baselineY = yScale(0);
 
     let linePath = "";
-    history.forEach((d, i) => {
+    points.forEach((d, i) => {
       const x = xScale(i);
       const y = yScale(d.score);
       linePath += (i === 0 ? "M" : "L") + x.toFixed(1) + "," + y.toFixed(1) + " ";
     });
     linePath = linePath.trim();
 
-    const lastX = xScale(history.length - 1);
+    const lastX = xScale(points.length - 1);
     const firstX = xScale(0);
     const areaPath = `${linePath} L${lastX.toFixed(1)},${baselineY.toFixed(1)} L${firstX.toFixed(1)},${baselineY.toFixed(1)} Z`;
 
     const upColor = getComputedStyle(document.documentElement).getPropertyValue("--up").trim();
     const downColor = getComputedStyle(document.documentElement).getPropertyValue("--down").trim();
     const textPrimary = getComputedStyle(document.documentElement).getPropertyValue("--text-primary").trim();
+    const textMuted = getComputedStyle(document.documentElement).getPropertyValue("--text-muted").trim();
     const baselineColor = getComputedStyle(document.documentElement).getPropertyValue("--baseline").trim();
 
     const ns = "http://www.w3.org/2000/svg";
     const defs = document.createElementNS(ns, "defs");
-    const clipUpId = "historyClipUp";
-    const clipDownId = "historyClipDown";
+    const clipUpId = svgId + "ClipUp";
+    const clipDownId = svgId + "ClipDown";
 
     const clipUp = document.createElementNS(ns, "clipPath");
     clipUp.setAttribute("id", clipUpId);
@@ -337,7 +340,6 @@
     baseline.setAttribute("stroke-width", "1");
     svg.appendChild(baseline);
 
-    const textMuted = getComputedStyle(document.documentElement).getPropertyValue("--text-muted").trim();
     const upLabel = document.createElementNS(ns, "text");
     upLabel.setAttribute("x", pad.left);
     upLabel.setAttribute("y", pad.top + 10);
@@ -363,8 +365,22 @@
     line.setAttribute("stroke-linecap", "round");
     svg.appendChild(line);
 
-    const lastY = yScale(history[history.length - 1].score);
-    const lastPolarity = history[history.length - 1].polarity;
+    // 強調したい地点(暴落当日など)にリングを表示
+    if (typeof options.highlightIndex === "number" && options.highlightIndex >= 0) {
+      const hx = xScale(options.highlightIndex);
+      const hy = yScale(points[options.highlightIndex].score);
+      const ring = document.createElementNS(ns, "circle");
+      ring.setAttribute("cx", hx);
+      ring.setAttribute("cy", hy);
+      ring.setAttribute("r", "7");
+      ring.setAttribute("fill", "none");
+      ring.setAttribute("stroke", textPrimary);
+      ring.setAttribute("stroke-width", "2");
+      svg.appendChild(ring);
+    }
+
+    const lastY = yScale(points[points.length - 1].score);
+    const lastPolarity = points[points.length - 1].polarity;
     const lastDotColor = lastPolarity === "up" ? upColor : lastPolarity === "down" ? downColor : textPrimary;
     const dot = document.createElementNS(ns, "circle");
     dot.setAttribute("cx", lastX);
@@ -389,14 +405,14 @@
     hit.setAttribute("fill", "transparent");
     svg.appendChild(hit);
 
-    const tooltip = document.getElementById("historyTooltip");
+    const tooltip = document.getElementById(tooltipId);
 
     function handleMove(clientX) {
       const rect = svg.getBoundingClientRect();
       const relX = clientX - rect.left;
-      let idx = Math.round(((relX - pad.left) / innerW) * (history.length - 1));
-      idx = Math.max(0, Math.min(history.length - 1, idx));
-      const point = history[idx];
+      let idx = Math.round(((relX - pad.left) / innerW) * (points.length - 1));
+      idx = Math.max(0, Math.min(points.length - 1, idx));
+      const point = points[idx];
       const x = xScale(idx);
       const y = yScale(point.score);
 
@@ -407,10 +423,14 @@
       tooltip.hidden = false;
       tooltip.innerHTML = "";
       const dateDiv = document.createElement("div");
-      dateDiv.textContent = point.date + "(" + point.label + ")";
+      dateDiv.textContent = point.date + "(" + point.label + ")" + (point.is_center ? " ★" : "");
       const valDiv = document.createElement("div");
       valDiv.className = "val";
-      valDiv.textContent = (point.score > 0 ? "+" : "") + point.score;
+      let valText = (point.score > 0 ? "+" : "") + point.score;
+      if (typeof point.change_pct === "number") {
+        valText += "  前日比" + (point.change_pct >= 0 ? "+" : "") + point.change_pct + "%";
+      }
+      valDiv.textContent = valText;
       tooltip.appendChild(dateDiv);
       tooltip.appendChild(valDiv);
 
@@ -427,6 +447,17 @@
     hit.addEventListener("pointermove", (e) => handleMove(e.clientX));
     hit.addEventListener("pointerdown", (e) => handleMove(e.clientX));
     hit.addEventListener("pointerleave", handleLeave);
+  }
+
+  function drawHistoryChart(history) {
+    drawDivergingChart("historyChart", "historyWrap", "historyTooltip", history);
+  }
+
+  function drawCrashChart(rows) {
+    const centerIndex = rows.findIndex((r) => r.is_center);
+    drawDivergingChart("crashChart", "crashChartWrap", "crashTooltip", rows, {
+      highlightIndex: centerIndex,
+    });
   }
 
   async function loadSignal() {
@@ -452,11 +483,65 @@
     }
   }
 
+  function renderCrashTable(rows) {
+    const table = document.getElementById("crashTable");
+    table.innerHTML = "";
+    rows.forEach((r) => {
+      const cls = POLARITY_CLASS[r.polarity] || "neutral";
+
+      const row = document.createElement("div");
+      row.className = "crash-row" + (r.is_center ? " crash-row-center" : "");
+
+      const dateSpan = document.createElement("span");
+      dateSpan.className = "crash-date";
+      dateSpan.textContent = r.date + (r.is_center ? " ★" : "");
+      row.appendChild(dateSpan);
+
+      const chgSpan = document.createElement("span");
+      chgSpan.className = "crash-chg " + (r.change_pct >= 0 ? "up" : "down");
+      chgSpan.textContent = (r.change_pct >= 0 ? "+" : "") + r.change_pct + "%";
+      row.appendChild(chgSpan);
+
+      const scoreSpan = document.createElement("span");
+      scoreSpan.className = "crash-score " + cls;
+      scoreSpan.textContent = (r.score > 0 ? "+" : "") + r.score;
+      row.appendChild(scoreSpan);
+
+      const labelSpan = document.createElement("span");
+      labelSpan.className = "crash-label " + cls;
+      labelSpan.textContent = r.label;
+      row.appendChild(labelSpan);
+
+      table.appendChild(row);
+    });
+  }
+
+  async function loadCrash() {
+    const select = document.getElementById("crashSelect");
+    const date = select.value;
+    const statusEl = document.getElementById("crashStatus");
+    statusEl.textContent = "読み込み中…";
+    try {
+      const res = await fetch(`/api/crash?date=${date}&before=7&after=7`);
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "取得エラー");
+      drawCrashChart(data.rows);
+      renderCrashTable(data.rows);
+      statusEl.textContent = "";
+    } catch (err) {
+      statusEl.textContent = "取得に失敗しました: " + err.message;
+    }
+  }
+
   document.getElementById("refreshBtn").addEventListener("click", loadSignal);
+  document.getElementById("crashSelect").addEventListener("change", loadCrash);
   window.addEventListener("resize", () => {
     if (lastPriceSeries) drawSparkline(lastPriceSeries);
-    if (lastHistory) drawHistoryChart(lastHistory);
+    Object.entries(chartRegistry).forEach(([svgId, c]) => {
+      drawDivergingChart(svgId, c.wrapId, c.tooltipId, c.points, c.options);
+    });
   });
 
   loadSignal();
+  loadCrash();
 })();
