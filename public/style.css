@@ -244,6 +244,15 @@ html, body {
   font-weight: 700;
 }
 
+/* ---- History chart ---- */
+.history-wrap {
+  position: relative;
+  width: 100%;
+}
+#historyChart {
+  display: block;
+  touch-action: pan-y;
+}
 /* ---- Breakdown ---- */
 .breakdown-list {
   display: flex;

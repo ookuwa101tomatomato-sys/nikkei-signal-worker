@@ -263,9 +263,91 @@ export async function computeSignal() {
   };
 }
 
+function findIndexUpTo(dates, dateStr) {
+  let idx = -1;
+  for (let i = 0; i < dates.length; i++) {
+    if (dates[i] <= dateStr) idx = i;
+    else break;
+  }
+  return idx;
+}
+
+export async function computeHistory(days = 30) {
+  const [nikkei, dow, sp, fx] = await Promise.all([
+    fetchChart(NIKKEI_TICKER, "8mo"),
+    fetchChart(DOW_TICKER, "6mo"),
+    fetchChart(SP500_TICKER, "6mo"),
+    fetchChart(FX_TICKER, "6mo"),
+  ]);
+
+  const closes = nikkei.closes;
+  const dates = nikkei.dates;
+
+  const minIdx = 75; // SMA75に必要な最低本数
+  const startIdx = Math.max(minIdx, closes.length - days);
+
+  const history = [];
+  for (let i = startIdx; i < closes.length; i++) {
+    const d = dates[i];
+    const sliceCloses = closes.slice(0, i + 1);
+
+    const dowIdx = findIndexUpTo(dow.dates, d);
+    const spIdx = findIndexUpTo(sp.dates, d);
+    const fxIdx = findIndexUpTo(fx.dates, d);
+    if (dowIdx < 1 || spIdx < 1 || fxIdx < 1) continue;
+
+    const components = [
+      scoreTrend(sliceCloses),
+      scoreRsi(sliceCloses),
+      scoreMacd(sliceCloses),
+      scoreUsMarket(dow.closes.slice(0, dowIdx + 1), sp.closes.slice(0, spIdx + 1)),
+      scoreFx(fx.closes.slice(0, fxIdx + 1)),
+    ];
+
+    let composite = 0;
+    for (const c of components) composite += c.score * WEIGHTS[c.key];
+    composite = clip(composite);
+    const [label, polarity] = labelForScore(composite);
+
+    history.push({
+      date: d,
+      score: Math.round(composite * 10) / 10,
+      label,
+      polarity,
+      close: Math.round(closes[i] * 100) / 100,
+    });
+  }
+  return history;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+
+    if (url.pathname === "/api/history") {
+      const days = Math.max(5, Math.min(90, parseInt(url.searchParams.get("days") || "30", 10) || 30));
+      const cache = caches.default;
+      const cacheKey = new Request(url.origin + "/api/history-cache-key?days=" + days, request);
+      const cached = await cache.match(cacheKey);
+      if (cached) return cached;
+
+      try {
+        const history = await computeHistory(days);
+        const response = new Response(JSON.stringify({ ok: true, days, history }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            "Cache-Control": "public, max-age=1800",
+          },
+        });
+        ctx.waitUntil(cache.put(cacheKey, response.clone()));
+        return response;
+      } catch (err) {
+        return new Response(JSON.stringify({ ok: false, error: String(err.message || err) }), {
+          status: 502,
+          headers: { "content-type": "application/json; charset=utf-8" },
+        });
+      }
+    }
 
     if (url.pathname === "/api/signal") {
       const cache = caches.default;

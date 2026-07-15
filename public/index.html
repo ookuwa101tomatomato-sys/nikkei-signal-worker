@@ -50,6 +50,14 @@
     <div id="breakdownList" class="breakdown-list"></div>
   </section>
 
+  <section class="card history-card">
+    <div class="card-title">過去1ヶ月のシグナル推移</div>
+    <div class="history-wrap" id="historyWrap">
+      <svg id="historyChart" width="100%" height="140" aria-label="過去1ヶ月の総合スコアの推移"></svg>
+      <div class="chart-tooltip" id="historyTooltip" hidden></div>
+    </div>
+  </section>
+
   <footer class="app-footer">
     <button id="refreshBtn" class="refresh-btn" type="button">更新する</button>
     <p class="disclaimer">
