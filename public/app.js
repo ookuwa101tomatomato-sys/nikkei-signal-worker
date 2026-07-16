@@ -160,11 +160,13 @@
 
   const chartRegistry = {};
 
-  // 日経平均の値動き(価格ライン・切りのいい数字の軸)と
-  // シグナルの状態(背景の色帯: 強気=青〜弱気=赤)を1つのチャートに重ねて描画する
-  function drawPriceSignalChart(svgId, wrapId, tooltipId, rows, options = {}) {
+  // 日経平均の価格、またはシグナルスコアを、切りのいい数字の軸+
+  // シグナルの状態(横軸の色帯: 強気=青〜弱気=赤)と重ねて描画する
+  // mode: "price"(既定, close を表示) | "score"(-100〜+100 のスコアを表示)
+  function drawChart(svgId, wrapId, tooltipId, rows, options = {}) {
     chartRegistry[svgId] = { rows, wrapId, tooltipId, options };
 
+    const mode = options.mode || "price";
     const svg = document.getElementById(svgId);
     const wrap = document.getElementById(wrapId);
     const width = wrap.clientWidth || 320;
@@ -176,10 +178,15 @@
 
     if (!rows || rows.length < 2) return;
 
-    const closes = rows.map((r) => r.close);
-    const min = Math.min(...closes);
-    const max = Math.max(...closes);
-    const { ticks, niceMin, niceMax } = niceTicks(min, max, 5);
+    const values = rows.map((r) => (mode === "score" ? r.score : r.close));
+    let ticks, niceMin, niceMax;
+    if (mode === "score") {
+      niceMin = -100;
+      niceMax = 100;
+      ticks = [-100, -50, 0, 50, 100];
+    } else {
+      ({ ticks, niceMin, niceMax } = niceTicks(Math.min(...values), Math.max(...values), 5));
+    }
 
     const innerW = width - pad.left - pad.right;
     const innerH = height - pad.top - pad.bottom;
@@ -189,6 +196,7 @@
     const textPrimary = getComputedStyle(document.documentElement).getPropertyValue("--text-primary").trim();
     const textMuted = getComputedStyle(document.documentElement).getPropertyValue("--text-muted").trim();
     const gridlineColor = getComputedStyle(document.documentElement).getPropertyValue("--gridline").trim();
+    const baselineColor = getComputedStyle(document.documentElement).getPropertyValue("--baseline").trim();
     const seriesColor = getComputedStyle(document.documentElement).getPropertyValue("--series-blue").trim();
     const upColor = getComputedStyle(document.documentElement).getPropertyValue("--up").trim();
     const downColor = getComputedStyle(document.documentElement).getPropertyValue("--down").trim();
@@ -214,12 +222,13 @@
     // 横グリッド線 + 切りのいい数字の軸ラベル
     ticks.forEach((t) => {
       const y = yScale(t);
+      const isZero = mode === "score" && t === 0;
       const line = document.createElementNS(ns, "line");
       line.setAttribute("x1", pad.left);
       line.setAttribute("x2", width - pad.right);
       line.setAttribute("y1", y.toFixed(1));
       line.setAttribute("y2", y.toFixed(1));
-      line.setAttribute("stroke", gridlineColor);
+      line.setAttribute("stroke", isZero ? baselineColor : gridlineColor);
       line.setAttribute("stroke-width", "1");
       svg.appendChild(line);
 
@@ -229,21 +238,22 @@
       label.setAttribute("font-size", "10px");
       label.setAttribute("text-anchor", "end");
       label.setAttribute("fill", textMuted);
-      label.textContent = Math.round(t).toLocaleString("ja-JP");
+      label.textContent = mode === "score" ? (t > 0 ? "+" + t : String(t)) : Math.round(t).toLocaleString("ja-JP");
       svg.appendChild(label);
     });
 
-    // 日経平均 価格ライン
+    // 価格 or スコアのライン
     let linePath = "";
     rows.forEach((r, i) => {
       const x = xScale(i);
-      const y = yScale(r.close);
+      const y = yScale(mode === "score" ? r.score : r.close);
       linePath += (i === 0 ? "M" : "L") + x.toFixed(1) + "," + y.toFixed(1) + " ";
     });
+    const lineColor = mode === "score" ? textPrimary : seriesColor;
     const line = document.createElementNS(ns, "path");
     line.setAttribute("d", linePath.trim());
     line.setAttribute("fill", "none");
-    line.setAttribute("stroke", seriesColor);
+    line.setAttribute("stroke", lineColor);
     line.setAttribute("stroke-width", "2");
     line.setAttribute("stroke-linejoin", "round");
     line.setAttribute("stroke-linecap", "round");
@@ -251,8 +261,9 @@
 
     // 強調したい地点(暴落当日など)にリングを表示
     if (typeof options.highlightIndex === "number" && options.highlightIndex >= 0) {
+      const hRow = rows[options.highlightIndex];
       const hx = xScale(options.highlightIndex);
-      const hy = yScale(rows[options.highlightIndex].close);
+      const hy = yScale(mode === "score" ? hRow.score : hRow.close);
       const ring = document.createElementNS(ns, "circle");
       ring.setAttribute("cx", hx);
       ring.setAttribute("cy", hy);
@@ -264,13 +275,17 @@
     }
 
     // 末端マーカー
+    const lastRow = rows[rows.length - 1];
     const lastX = xScale(rows.length - 1);
-    const lastY = yScale(rows[rows.length - 1].close);
+    const lastY = yScale(mode === "score" ? lastRow.score : lastRow.close);
+    const lastPolarity = POLARITY_CLASS[lastRow.polarity] || "neutral";
+    const dotColor =
+      mode === "score" ? (lastPolarity === "up" ? upColor : lastPolarity === "down" ? downColor : textPrimary) : seriesColor;
     const dot = document.createElementNS(ns, "circle");
     dot.setAttribute("cx", lastX);
     dot.setAttribute("cy", lastY);
     dot.setAttribute("r", "4");
-    dot.setAttribute("fill", seriesColor);
+    dot.setAttribute("fill", dotColor);
     svg.appendChild(dot);
 
     // クロスヘア(非表示状態で用意)
@@ -300,7 +315,7 @@
       idx = Math.max(0, Math.min(rows.length - 1, idx));
       const point = rows[idx];
       const x = xScale(idx);
-      const y = yScale(point.close);
+      const y = yScale(mode === "score" ? point.score : point.close);
 
       crosshair.setAttribute("x1", x);
       crosshair.setAttribute("x2", x);
@@ -312,9 +327,13 @@
       dateDiv.textContent = point.date + (point.is_center ? " ★" : "");
       const valDiv = document.createElement("div");
       valDiv.className = "val";
-      valDiv.textContent = fmtNumber(point.close, 0) + "円";
+      valDiv.textContent =
+        mode === "score" ? (point.score > 0 ? "+" : "") + point.score : fmtNumber(point.close, 0) + "円";
       const subDiv = document.createElement("div");
-      let subText = point.label + "(" + (point.score > 0 ? "+" : "") + point.score + ")";
+      let subText =
+        mode === "score"
+          ? point.label + "  終値" + fmtNumber(point.close, 0) + "円"
+          : point.label + "(" + (point.score > 0 ? "+" : "") + point.score + ")";
       if (typeof point.change_pct === "number") {
         subText += "  前日比" + (point.change_pct >= 0 ? "+" : "") + point.change_pct + "%";
       }
@@ -352,7 +371,8 @@
 
       const historyData = await historyRes.json();
       if (historyData.ok) {
-        drawPriceSignalChart("historyChart", "historyWrap", "historyTooltip", historyData.history);
+        drawChart("historyChart", "historyWrap", "historyTooltip", historyData.history, { mode: "price" });
+        drawChart("historyScoreChart", "historyScoreWrap", "historyScoreTooltip", historyData.history, { mode: "score" });
       }
 
       const updated = new Date(data.updated_at);
@@ -405,7 +425,12 @@
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || "取得エラー");
       const centerIndex = data.rows.findIndex((r) => r.is_center);
-      drawPriceSignalChart("crashChart", "crashChartWrap", "crashTooltip", data.rows, {
+      drawChart("crashChart", "crashChartWrap", "crashTooltip", data.rows, {
+        mode: "price",
+        highlightIndex: centerIndex,
+      });
+      drawChart("crashScoreChart", "crashScoreChartWrap", "crashScoreTooltip", data.rows, {
+        mode: "score",
         highlightIndex: centerIndex,
       });
       renderCrashTable(data.rows);
@@ -419,7 +444,7 @@
   document.getElementById("crashSelect").addEventListener("change", loadCrash);
   window.addEventListener("resize", () => {
     Object.entries(chartRegistry).forEach(([svgId, c]) => {
-      drawPriceSignalChart(svgId, c.wrapId, c.tooltipId, c.rows, c.options);
+      drawChart(svgId, c.wrapId, c.tooltipId, c.rows, c.options);
     });
   });
 
