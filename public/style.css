@@ -269,6 +269,31 @@ html, body {
   display: block;
   touch-action: pan-y;
 }
+/* ---- Line legend (price line vs score line) ---- */
+.line-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.line-legend-item {
+  display: inline-flex;
+  align-items: center;
+}
+.line-key {
+  display: inline-block;
+  width: 16px;
+  height: 0;
+  margin-right: 5px;
+  border-top: 2px solid var(--series-blue);
+  vertical-align: middle;
+}
+.line-key-dashed {
+  border-top: 1.5px dashed var(--text-secondary);
+}
+
 /* ---- Band legend (price+signal combined chart) ---- */
 .band-legend {
   display: flex;

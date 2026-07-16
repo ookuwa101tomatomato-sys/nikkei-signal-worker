@@ -185,9 +185,16 @@
     const yScale = (v) => pad.top + innerH - ((v - niceMin) / (niceMax - niceMin)) * innerH;
 
     const textPrimary = getComputedStyle(document.documentElement).getPropertyValue("--text-primary").trim();
+    const textSecondary = getComputedStyle(document.documentElement).getPropertyValue("--text-secondary").trim();
     const textMuted = getComputedStyle(document.documentElement).getPropertyValue("--text-muted").trim();
     const gridlineColor = getComputedStyle(document.documentElement).getPropertyValue("--gridline").trim();
     const seriesColor = getComputedStyle(document.documentElement).getPropertyValue("--series-blue").trim();
+    const upColor = getComputedStyle(document.documentElement).getPropertyValue("--up").trim();
+    const downColor = getComputedStyle(document.documentElement).getPropertyValue("--down").trim();
+
+    // シグナルスコア(-100〜+100)は価格とスケールが異なるため、
+    // 同じプロット領域の高さいっぱいに正規化した参考ラインとして重ねる(軸は表示しない)
+    const scoreYScale = (v) => pad.top + innerH - ((v + 100) / 200) * innerH;
 
     const ns = "http://www.w3.org/2000/svg";
 
@@ -244,6 +251,33 @@
     line.setAttribute("stroke-linejoin", "round");
     line.setAttribute("stroke-linecap", "round");
     svg.appendChild(line);
+
+    // シグナルスコアの参考ライン(破線、価格とは別スケール)
+    let scoreLinePath = "";
+    rows.forEach((r, i) => {
+      const x = xScale(i);
+      const y = scoreYScale(r.score);
+      scoreLinePath += (i === 0 ? "M" : "L") + x.toFixed(1) + "," + y.toFixed(1) + " ";
+    });
+    const scoreLine = document.createElementNS(ns, "path");
+    scoreLine.setAttribute("d", scoreLinePath.trim());
+    scoreLine.setAttribute("fill", "none");
+    scoreLine.setAttribute("stroke", textSecondary);
+    scoreLine.setAttribute("stroke-width", "1.5");
+    scoreLine.setAttribute("stroke-dasharray", "4 3");
+    scoreLine.setAttribute("stroke-linejoin", "round");
+    scoreLine.setAttribute("stroke-linecap", "round");
+    svg.appendChild(scoreLine);
+
+    const lastScoreRow = rows[rows.length - 1];
+    const lastScorePolarity = POLARITY_CLASS[lastScoreRow.polarity] || "neutral";
+    const scoreDotColor = lastScorePolarity === "up" ? upColor : lastScorePolarity === "down" ? downColor : textSecondary;
+    const scoreDot = document.createElementNS(ns, "circle");
+    scoreDot.setAttribute("cx", xScale(rows.length - 1));
+    scoreDot.setAttribute("cy", scoreYScale(lastScoreRow.score));
+    scoreDot.setAttribute("r", "3.5");
+    scoreDot.setAttribute("fill", scoreDotColor);
+    svg.appendChild(scoreDot);
 
     // 強調したい地点(暴落当日など)にリングを表示
     if (typeof options.highlightIndex === "number" && options.highlightIndex >= 0) {
