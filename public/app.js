@@ -252,6 +252,18 @@
     line.setAttribute("stroke-linecap", "round");
     svg.appendChild(line);
 
+    // シグナルスコアの0ライン(中立の基準線)
+    const zeroY = scoreYScale(0);
+    const zeroLine = document.createElementNS(ns, "line");
+    zeroLine.setAttribute("x1", pad.left);
+    zeroLine.setAttribute("x2", width - pad.right);
+    zeroLine.setAttribute("y1", zeroY.toFixed(1));
+    zeroLine.setAttribute("y2", zeroY.toFixed(1));
+    zeroLine.setAttribute("stroke", textMuted);
+    zeroLine.setAttribute("stroke-width", "1");
+    zeroLine.setAttribute("stroke-dasharray", "2 2");
+    svg.appendChild(zeroLine);
+
     // シグナルスコアの参考ライン(破線、価格とは別スケール)
     let scoreLinePath = "";
     rows.forEach((r, i) => {
