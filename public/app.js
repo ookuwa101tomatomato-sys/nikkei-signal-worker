@@ -19,8 +19,6 @@
 
   const ARROW = { up: "▲", down: "▼", neutral: "●" };
 
-  let lastPriceSeries = null;
-
   function fmtNumber(n, digits) {
     return Number(n).toLocaleString("ja-JP", {
       minimumFractionDigits: digits,
@@ -118,55 +116,130 @@
     });
   }
 
-  function drawSparkline(series) {
-    lastPriceSeries = series;
-    const svg = document.getElementById("sparkline");
-    const wrap = document.getElementById("sparklineWrap");
+  // "切りのいい" 目盛りを計算する(Heckbertのnice numbersアルゴリズム)
+  function niceNumber(range, round) {
+    if (range <= 0) return 1;
+    const exponent = Math.floor(Math.log10(range));
+    const fraction = range / Math.pow(10, exponent);
+    let niceFraction;
+    if (round) {
+      if (fraction < 1.5) niceFraction = 1;
+      else if (fraction < 3) niceFraction = 2;
+      else if (fraction < 7) niceFraction = 5;
+      else niceFraction = 10;
+    } else {
+      if (fraction <= 1) niceFraction = 1;
+      else if (fraction <= 2) niceFraction = 2;
+      else if (fraction <= 5) niceFraction = 5;
+      else niceFraction = 10;
+    }
+    return niceFraction * Math.pow(10, exponent);
+  }
+
+  function niceTicks(min, max, maxTicks) {
+    if (min === max) {
+      min -= 1;
+      max += 1;
+    }
+    const range = niceNumber(max - min, false);
+    const step = niceNumber(range / (maxTicks - 1), true);
+    const niceMin = Math.floor(min / step) * step;
+    const niceMax = Math.ceil(max / step) * step;
+    const ticks = [];
+    for (let v = niceMin; v <= niceMax + step * 1e-6; v += step) ticks.push(Math.round(v * 100) / 100);
+    return { ticks, niceMin, niceMax };
+  }
+
+  const BAND_VAR = {
+    up_strong: "--up-wash-strong",
+    up_weak: "--up-wash-weak",
+    neutral: "--neutral-mid",
+    down_weak: "--down-wash-weak",
+    down_strong: "--down-wash-strong",
+  };
+
+  const chartRegistry = {};
+
+  // 日経平均の値動き(価格ライン・切りのいい数字の軸)と
+  // シグナルの状態(背景の色帯: 強気=青〜弱気=赤)を1つのチャートに重ねて描画する
+  function drawPriceSignalChart(svgId, wrapId, tooltipId, rows, options = {}) {
+    chartRegistry[svgId] = { rows, wrapId, tooltipId, options };
+
+    const svg = document.getElementById(svgId);
+    const wrap = document.getElementById(wrapId);
     const width = wrap.clientWidth || 320;
-    const height = 160;
-    const pad = { top: 12, right: 8, bottom: 8, left: 8 };
+    const height = options.height || 200;
+    const pad = { top: 10, right: 10, bottom: 8, left: 54 };
 
     svg.setAttribute("viewBox", "0 0 " + width + " " + height);
     svg.innerHTML = "";
 
-    if (!series || series.length < 2) return;
+    if (!rows || rows.length < 2) return;
 
-    const closes = series.map((d) => d.close);
+    const closes = rows.map((r) => r.close);
     const min = Math.min(...closes);
     const max = Math.max(...closes);
-    const range = max - min || 1;
-    const padY = range * 0.08;
-    const yMin = min - padY;
-    const yMax = max + padY;
+    const { ticks, niceMin, niceMax } = niceTicks(min, max, 5);
 
     const innerW = width - pad.left - pad.right;
     const innerH = height - pad.top - pad.bottom;
+    const xScale = (i) => pad.left + (i / (rows.length - 1)) * innerW;
+    const yScale = (v) => pad.top + innerH - ((v - niceMin) / (niceMax - niceMin)) * innerH;
 
-    const xScale = (i) => pad.left + (i / (series.length - 1)) * innerW;
-    const yScale = (v) => pad.top + innerH - ((v - yMin) / (yMax - yMin)) * innerH;
-
-    let linePath = "";
-    series.forEach((d, i) => {
-      const x = xScale(i);
-      const y = yScale(d.close);
-      linePath += (i === 0 ? "M" : "L") + x.toFixed(1) + "," + y.toFixed(1) + " ";
-    });
-
-    const baseline = pad.top + innerH;
-    const areaPath =
-      linePath + `L${xScale(series.length - 1).toFixed(1)},${baseline} L${xScale(0).toFixed(1)},${baseline} Z`;
-
+    const textPrimary = getComputedStyle(document.documentElement).getPropertyValue("--text-primary").trim();
+    const textMuted = getComputedStyle(document.documentElement).getPropertyValue("--text-muted").trim();
+    const gridlineColor = getComputedStyle(document.documentElement).getPropertyValue("--gridline").trim();
     const seriesColor = getComputedStyle(document.documentElement).getPropertyValue("--series-blue").trim();
+    const upColor = getComputedStyle(document.documentElement).getPropertyValue("--up").trim();
+    const downColor = getComputedStyle(document.documentElement).getPropertyValue("--down").trim();
 
     const ns = "http://www.w3.org/2000/svg";
 
-    const area = document.createElementNS(ns, "path");
-    area.setAttribute("d", areaPath);
-    area.setAttribute("fill", seriesColor);
-    area.setAttribute("fill-opacity", "0.10");
-    area.setAttribute("stroke", "none");
-    svg.appendChild(area);
+    // 背景の色帯(その日のシグナル状態)
+    const halfStep = rows.length > 1 ? (xScale(1) - xScale(0)) / 2 : innerW / 2;
+    rows.forEach((r, i) => {
+      const varName = BAND_VAR[r.polarity];
+      if (!varName) return;
+      const x0 = Math.max(pad.left, xScale(i) - halfStep);
+      const x1 = Math.min(width - pad.right, xScale(i) + halfStep);
+      const rect = document.createElementNS(ns, "rect");
+      rect.setAttribute("x", x0.toFixed(1));
+      rect.setAttribute("y", pad.top);
+      rect.setAttribute("width", Math.max(0, x1 - x0).toFixed(1));
+      rect.setAttribute("height", innerH);
+      rect.style.fill = `var(${varName})`;
+      svg.appendChild(rect);
+    });
 
+    // 横グリッド線 + 切りのいい数字の軸ラベル
+    ticks.forEach((t) => {
+      const y = yScale(t);
+      const line = document.createElementNS(ns, "line");
+      line.setAttribute("x1", pad.left);
+      line.setAttribute("x2", width - pad.right);
+      line.setAttribute("y1", y.toFixed(1));
+      line.setAttribute("y2", y.toFixed(1));
+      line.setAttribute("stroke", gridlineColor);
+      line.setAttribute("stroke-width", "1");
+      svg.appendChild(line);
+
+      const label = document.createElementNS(ns, "text");
+      label.setAttribute("x", pad.left - 6);
+      label.setAttribute("y", (y + 3).toFixed(1));
+      label.setAttribute("font-size", "10px");
+      label.setAttribute("text-anchor", "end");
+      label.setAttribute("fill", textMuted);
+      label.textContent = Math.round(t).toLocaleString("ja-JP");
+      svg.appendChild(label);
+    });
+
+    // 日経平均 価格ライン
+    let linePath = "";
+    rows.forEach((r, i) => {
+      const x = xScale(i);
+      const y = yScale(r.close);
+      linePath += (i === 0 ? "M" : "L") + x.toFixed(1) + "," + y.toFixed(1) + " ";
+    });
     const line = document.createElementNS(ns, "path");
     line.setAttribute("d", linePath.trim());
     line.setAttribute("fill", "none");
@@ -176,199 +249,10 @@
     line.setAttribute("stroke-linecap", "round");
     svg.appendChild(line);
 
-    // 末端マーカー
-    const lastX = xScale(series.length - 1);
-    const lastY = yScale(series[series.length - 1].close);
-    const dot = document.createElementNS(ns, "circle");
-    dot.setAttribute("cx", lastX);
-    dot.setAttribute("cy", lastY);
-    dot.setAttribute("r", "4");
-    dot.setAttribute("fill", seriesColor);
-    svg.appendChild(dot);
-
-    // クロスヘア(非表示状態で用意)
-    const crosshair = document.createElementNS(ns, "line");
-    crosshair.setAttribute("y1", pad.top);
-    crosshair.setAttribute("y2", baseline);
-    crosshair.setAttribute("stroke", "var(--baseline)");
-    crosshair.setAttribute("stroke-width", "1");
-    crosshair.setAttribute("visibility", "hidden");
-    crosshair.setAttribute("id", "crosshairLine");
-    svg.appendChild(crosshair);
-
-    // ポインタ用の透明な当たり判定レイヤー
-    const hit = document.createElementNS(ns, "rect");
-    hit.setAttribute("x", "0");
-    hit.setAttribute("y", "0");
-    hit.setAttribute("width", width);
-    hit.setAttribute("height", height);
-    hit.setAttribute("fill", "transparent");
-    svg.appendChild(hit);
-
-    const tooltip = document.getElementById("chartTooltip");
-
-    function handleMove(clientX) {
-      const rect = svg.getBoundingClientRect();
-      const relX = clientX - rect.left;
-      let idx = Math.round(((relX - pad.left) / innerW) * (series.length - 1));
-      idx = Math.max(0, Math.min(series.length - 1, idx));
-      const point = series[idx];
-      const x = xScale(idx);
-      const y = yScale(point.close);
-
-      crosshair.setAttribute("x1", x);
-      crosshair.setAttribute("x2", x);
-      crosshair.setAttribute("visibility", "visible");
-
-      tooltip.hidden = false;
-      tooltip.innerHTML = "";
-      const dateDiv = document.createElement("div");
-      dateDiv.textContent = point.date;
-      const valDiv = document.createElement("div");
-      valDiv.className = "val";
-      valDiv.textContent = fmtNumber(point.close, 0) + " 円";
-      tooltip.appendChild(dateDiv);
-      tooltip.appendChild(valDiv);
-
-      const wrapRect = wrap.getBoundingClientRect();
-      tooltip.style.left = (x / width) * wrapRect.width + "px";
-      tooltip.style.top = (y / height) * height + "px";
-    }
-
-    function handleLeave() {
-      crosshair.setAttribute("visibility", "hidden");
-      tooltip.hidden = true;
-    }
-
-    hit.addEventListener("pointermove", (e) => handleMove(e.clientX));
-    hit.addEventListener("pointerdown", (e) => handleMove(e.clientX));
-    hit.addEventListener("pointerleave", handleLeave);
-  }
-
-  const chartRegistry = {};
-
-  function drawDivergingChart(svgId, wrapId, tooltipId, points, options = {}) {
-    chartRegistry[svgId] = { points, wrapId, tooltipId, options };
-
-    const svg = document.getElementById(svgId);
-    const wrap = document.getElementById(wrapId);
-    const width = wrap.clientWidth || 320;
-    const height = options.height || 140;
-    const pad = { top: 12, right: 8, bottom: 8, left: 8 };
-
-    svg.setAttribute("viewBox", "0 0 " + width + " " + height);
-    svg.innerHTML = "";
-
-    if (!points || points.length < 2) return;
-
-    const yMin = -100;
-    const yMax = 100;
-    const innerW = width - pad.left - pad.right;
-    const innerH = height - pad.top - pad.bottom;
-
-    const xScale = (i) => pad.left + (i / (points.length - 1)) * innerW;
-    const yScale = (v) => pad.top + innerH - ((v - yMin) / (yMax - yMin)) * innerH;
-    const baselineY = yScale(0);
-
-    let linePath = "";
-    points.forEach((d, i) => {
-      const x = xScale(i);
-      const y = yScale(d.score);
-      linePath += (i === 0 ? "M" : "L") + x.toFixed(1) + "," + y.toFixed(1) + " ";
-    });
-    linePath = linePath.trim();
-
-    const lastX = xScale(points.length - 1);
-    const firstX = xScale(0);
-    const areaPath = `${linePath} L${lastX.toFixed(1)},${baselineY.toFixed(1)} L${firstX.toFixed(1)},${baselineY.toFixed(1)} Z`;
-
-    const upColor = getComputedStyle(document.documentElement).getPropertyValue("--up").trim();
-    const downColor = getComputedStyle(document.documentElement).getPropertyValue("--down").trim();
-    const textPrimary = getComputedStyle(document.documentElement).getPropertyValue("--text-primary").trim();
-    const textMuted = getComputedStyle(document.documentElement).getPropertyValue("--text-muted").trim();
-    const baselineColor = getComputedStyle(document.documentElement).getPropertyValue("--baseline").trim();
-
-    const ns = "http://www.w3.org/2000/svg";
-    const defs = document.createElementNS(ns, "defs");
-    const clipUpId = svgId + "ClipUp";
-    const clipDownId = svgId + "ClipDown";
-
-    const clipUp = document.createElementNS(ns, "clipPath");
-    clipUp.setAttribute("id", clipUpId);
-    const clipUpRect = document.createElementNS(ns, "rect");
-    clipUpRect.setAttribute("x", "0");
-    clipUpRect.setAttribute("y", "0");
-    clipUpRect.setAttribute("width", width);
-    clipUpRect.setAttribute("height", Math.max(baselineY, 0));
-    clipUp.appendChild(clipUpRect);
-
-    const clipDown = document.createElementNS(ns, "clipPath");
-    clipDown.setAttribute("id", clipDownId);
-    const clipDownRect = document.createElementNS(ns, "rect");
-    clipDownRect.setAttribute("x", "0");
-    clipDownRect.setAttribute("y", baselineY);
-    clipDownRect.setAttribute("width", width);
-    clipDownRect.setAttribute("height", Math.max(height - baselineY, 0));
-    clipDown.appendChild(clipDownRect);
-
-    defs.appendChild(clipUp);
-    defs.appendChild(clipDown);
-    svg.appendChild(defs);
-
-    const areaUp = document.createElementNS(ns, "path");
-    areaUp.setAttribute("d", areaPath);
-    areaUp.setAttribute("fill", upColor);
-    areaUp.setAttribute("fill-opacity", "0.10");
-    areaUp.setAttribute("stroke", "none");
-    areaUp.setAttribute("clip-path", `url(#${clipUpId})`);
-    svg.appendChild(areaUp);
-
-    const areaDown = document.createElementNS(ns, "path");
-    areaDown.setAttribute("d", areaPath);
-    areaDown.setAttribute("fill", downColor);
-    areaDown.setAttribute("fill-opacity", "0.10");
-    areaDown.setAttribute("stroke", "none");
-    areaDown.setAttribute("clip-path", `url(#${clipDownId})`);
-    svg.appendChild(areaDown);
-
-    const baseline = document.createElementNS(ns, "line");
-    baseline.setAttribute("x1", pad.left);
-    baseline.setAttribute("x2", width - pad.right);
-    baseline.setAttribute("y1", baselineY);
-    baseline.setAttribute("y2", baselineY);
-    baseline.setAttribute("stroke", baselineColor);
-    baseline.setAttribute("stroke-width", "1");
-    svg.appendChild(baseline);
-
-    const upLabel = document.createElementNS(ns, "text");
-    upLabel.setAttribute("x", pad.left);
-    upLabel.setAttribute("y", pad.top + 10);
-    upLabel.setAttribute("font-size", "11px");
-    upLabel.setAttribute("fill", textMuted);
-    upLabel.textContent = "強気";
-    svg.appendChild(upLabel);
-
-    const downLabel = document.createElementNS(ns, "text");
-    downLabel.setAttribute("x", pad.left);
-    downLabel.setAttribute("y", height - pad.bottom - 2);
-    downLabel.setAttribute("font-size", "11px");
-    downLabel.setAttribute("fill", textMuted);
-    downLabel.textContent = "弱気";
-    svg.appendChild(downLabel);
-
-    const line = document.createElementNS(ns, "path");
-    line.setAttribute("d", linePath);
-    line.setAttribute("fill", "none");
-    line.setAttribute("stroke", textPrimary);
-    line.setAttribute("stroke-width", "2");
-    line.setAttribute("stroke-linejoin", "round");
-    line.setAttribute("stroke-linecap", "round");
-    svg.appendChild(line);
-
     // 強調したい地点(暴落当日など)にリングを表示
     if (typeof options.highlightIndex === "number" && options.highlightIndex >= 0) {
       const hx = xScale(options.highlightIndex);
-      const hy = yScale(points[options.highlightIndex].score);
+      const hy = yScale(rows[options.highlightIndex].close);
       const ring = document.createElementNS(ns, "circle");
       ring.setAttribute("cx", hx);
       ring.setAttribute("cy", hy);
@@ -379,24 +263,26 @@
       svg.appendChild(ring);
     }
 
-    const lastY = yScale(points[points.length - 1].score);
-    const lastPolarity = points[points.length - 1].polarity;
-    const lastDotColor = lastPolarity === "up" ? upColor : lastPolarity === "down" ? downColor : textPrimary;
+    // 末端マーカー
+    const lastX = xScale(rows.length - 1);
+    const lastY = yScale(rows[rows.length - 1].close);
     const dot = document.createElementNS(ns, "circle");
     dot.setAttribute("cx", lastX);
     dot.setAttribute("cy", lastY);
     dot.setAttribute("r", "4");
-    dot.setAttribute("fill", lastDotColor);
+    dot.setAttribute("fill", seriesColor);
     svg.appendChild(dot);
 
+    // クロスヘア(非表示状態で用意)
     const crosshair = document.createElementNS(ns, "line");
     crosshair.setAttribute("y1", pad.top);
     crosshair.setAttribute("y2", height - pad.bottom);
-    crosshair.setAttribute("stroke", baselineColor);
+    crosshair.setAttribute("stroke", "var(--baseline)");
     crosshair.setAttribute("stroke-width", "1");
     crosshair.setAttribute("visibility", "hidden");
     svg.appendChild(crosshair);
 
+    // ポインタ用の透明な当たり判定レイヤー
     const hit = document.createElementNS(ns, "rect");
     hit.setAttribute("x", "0");
     hit.setAttribute("y", "0");
@@ -410,11 +296,11 @@
     function handleMove(clientX) {
       const rect = svg.getBoundingClientRect();
       const relX = clientX - rect.left;
-      let idx = Math.round(((relX - pad.left) / innerW) * (points.length - 1));
-      idx = Math.max(0, Math.min(points.length - 1, idx));
-      const point = points[idx];
+      let idx = Math.round(((relX - pad.left) / innerW) * (rows.length - 1));
+      idx = Math.max(0, Math.min(rows.length - 1, idx));
+      const point = rows[idx];
       const x = xScale(idx);
-      const y = yScale(point.score);
+      const y = yScale(point.close);
 
       crosshair.setAttribute("x1", x);
       crosshair.setAttribute("x2", x);
@@ -423,16 +309,19 @@
       tooltip.hidden = false;
       tooltip.innerHTML = "";
       const dateDiv = document.createElement("div");
-      dateDiv.textContent = point.date + "(" + point.label + ")" + (point.is_center ? " ★" : "");
+      dateDiv.textContent = point.date + (point.is_center ? " ★" : "");
       const valDiv = document.createElement("div");
       valDiv.className = "val";
-      let valText = (point.score > 0 ? "+" : "") + point.score;
+      valDiv.textContent = fmtNumber(point.close, 0) + "円";
+      const subDiv = document.createElement("div");
+      let subText = point.label + "(" + (point.score > 0 ? "+" : "") + point.score + ")";
       if (typeof point.change_pct === "number") {
-        valText += "  前日比" + (point.change_pct >= 0 ? "+" : "") + point.change_pct + "%";
+        subText += "  前日比" + (point.change_pct >= 0 ? "+" : "") + point.change_pct + "%";
       }
-      valDiv.textContent = valText;
+      subDiv.textContent = subText;
       tooltip.appendChild(dateDiv);
       tooltip.appendChild(valDiv);
+      tooltip.appendChild(subDiv);
 
       const wrapRect = wrap.getBoundingClientRect();
       tooltip.style.left = (x / width) * wrapRect.width + "px";
@@ -449,17 +338,6 @@
     hit.addEventListener("pointerleave", handleLeave);
   }
 
-  function drawHistoryChart(history) {
-    drawDivergingChart("historyChart", "historyWrap", "historyTooltip", history);
-  }
-
-  function drawCrashChart(rows) {
-    const centerIndex = rows.findIndex((r) => r.is_center);
-    drawDivergingChart("crashChart", "crashChartWrap", "crashTooltip", rows, {
-      highlightIndex: centerIndex,
-    });
-  }
-
   async function loadSignal() {
     const updatedEl = document.getElementById("updated");
     updatedEl.textContent = "更新中…";
@@ -471,10 +349,11 @@
       renderHero(data);
       renderMeter(data);
       renderBreakdown(data);
-      drawSparkline(data.price_series);
 
       const historyData = await historyRes.json();
-      if (historyData.ok) drawHistoryChart(historyData.history);
+      if (historyData.ok) {
+        drawPriceSignalChart("historyChart", "historyWrap", "historyTooltip", historyData.history);
+      }
 
       const updated = new Date(data.updated_at);
       updatedEl.textContent = "最終更新: " + updated.toLocaleString("ja-JP");
@@ -525,7 +404,10 @@
       const res = await fetch(`/api/crash?date=${date}&before=7&after=7`);
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || "取得エラー");
-      drawCrashChart(data.rows);
+      const centerIndex = data.rows.findIndex((r) => r.is_center);
+      drawPriceSignalChart("crashChart", "crashChartWrap", "crashTooltip", data.rows, {
+        highlightIndex: centerIndex,
+      });
       renderCrashTable(data.rows);
       statusEl.textContent = "";
     } catch (err) {
@@ -536,9 +418,8 @@
   document.getElementById("refreshBtn").addEventListener("click", loadSignal);
   document.getElementById("crashSelect").addEventListener("change", loadCrash);
   window.addEventListener("resize", () => {
-    if (lastPriceSeries) drawSparkline(lastPriceSeries);
     Object.entries(chartRegistry).forEach(([svgId, c]) => {
-      drawDivergingChart(svgId, c.wrapId, c.tooltipId, c.points, c.options);
+      drawPriceSignalChart(svgId, c.wrapId, c.tooltipId, c.rows, c.options);
     });
   });
 

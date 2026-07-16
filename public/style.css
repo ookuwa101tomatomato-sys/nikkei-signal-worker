@@ -14,6 +14,10 @@
   --down: #e34948;
   --up-wash: rgba(42, 120, 214, 0.10);
   --down-wash: rgba(227, 73, 72, 0.10);
+  --up-wash-weak: rgba(42, 120, 214, 0.08);
+  --up-wash-strong: rgba(42, 120, 214, 0.22);
+  --down-wash-weak: rgba(227, 73, 72, 0.08);
+  --down-wash-strong: rgba(227, 73, 72, 0.22);
   --series-blue: #2a78d6;
 }
 
@@ -33,6 +37,10 @@
     --down: #e66767;
     --up-wash: rgba(57, 135, 229, 0.14);
     --down-wash: rgba(230, 103, 103, 0.14);
+    --up-wash-weak: rgba(57, 135, 229, 0.10);
+    --up-wash-strong: rgba(57, 135, 229, 0.26);
+    --down-wash-weak: rgba(230, 103, 103, 0.10);
+    --down-wash-strong: rgba(230, 103, 103, 0.26);
     --series-blue: #3987e5;
   }
 }
@@ -51,6 +59,10 @@
   --down: #e66767;
   --up-wash: rgba(57, 135, 229, 0.14);
   --down-wash: rgba(230, 103, 103, 0.14);
+  --up-wash-weak: rgba(57, 135, 229, 0.10);
+  --up-wash-strong: rgba(57, 135, 229, 0.26);
+  --down-wash-weak: rgba(230, 103, 103, 0.10);
+  --down-wash-strong: rgba(230, 103, 103, 0.26);
   --series-blue: #3987e5;
 }
 
@@ -68,6 +80,10 @@
   --down: #e34948;
   --up-wash: rgba(42, 120, 214, 0.10);
   --down-wash: rgba(227, 73, 72, 0.10);
+  --up-wash-weak: rgba(42, 120, 214, 0.08);
+  --up-wash-strong: rgba(42, 120, 214, 0.22);
+  --down-wash-weak: rgba(227, 73, 72, 0.08);
+  --down-wash-strong: rgba(227, 73, 72, 0.22);
   --series-blue: #2a78d6;
 }
 
@@ -253,6 +269,29 @@ html, body {
   display: block;
   touch-action: pan-y;
 }
+/* ---- Band legend (price+signal combined chart) ---- */
+.band-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.band-chip {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 4px;
+  vertical-align: middle;
+  border: 1px solid var(--border);
+}
+.band-legend-item {
+  display: inline-flex;
+  align-items: center;
+}
+
 /* ---- Crash analysis ---- */
 .crash-select {
   width: 100%;
