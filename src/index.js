@@ -3,19 +3,23 @@
  * signal_engine.py と同じロジック(重み・しきい値)をJavaScriptに移植。
  */
 
+import * as XLSX from "xlsx";
+
 const NIKKEI_TICKER = "^N225";
 const NIKKEI_FUTURES_TICKER = "NIY=F"; // CME日経225先物(円建て) — トレンド/RSI/MACDの算出元
 const FX_TICKER = "JPY=X";
 const VIX_TICKER = "^VIX";
+const MARGIN_PAGE_URL = "https://www.jpx.co.jp/markets/statistics-equities/margin/04.html"; // 信用取引現在高(JPX公式、週次)
 
 const INDICATOR_MIN_LEN = 75; // SMA75に必要な最低本数(これ未満の先物データしかない場合は現物にフォールバック)
 
 const WEIGHTS = {
-  trend: 0.35,
-  rsi: 0.15,
-  macd: 0.22,
-  fx: 0.16,
-  vix: 0.12,
+  trend: 0.32,
+  rsi: 0.13,
+  macd: 0.20,
+  fx: 0.14,
+  vix: 0.11,
+  margin: 0.10,
 };
 
 function clip(value, lo = -100, hi = 100) {
@@ -133,6 +137,85 @@ async function fetchChartSafe(ticker, params) {
   } catch (err) {
     return { dates: [], closes: [] };
   }
+}
+
+const MARGIN_BROWSER_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+  "Accept": "text/html,application/xhtml+xml",
+};
+
+// JPX「信用取引現在高」ページから最新のExcelファイルのURLを見つける
+async function findLatestMarginXlsUrl() {
+  const res = await fetch(MARGIN_PAGE_URL, { headers: MARGIN_BROWSER_HEADERS });
+  if (!res.ok) throw new Error(`JPXページ取得に失敗しました (HTTP ${res.status})`);
+  const html = await res.text();
+
+  const matches = [...html.matchAll(/href="(\/markets\/statistics-equities\/margin\/[^"]*?mtseisan(\d{8})00\.xls)"/g)];
+  if (matches.length === 0) throw new Error("信用取引現在高のExcelリンクが見つかりません");
+
+  matches.sort((a, b) => Number(a[2]) - Number(b[2]));
+  const latest = matches[matches.length - 1];
+  return "https://www.jpx.co.jp" + latest[1];
+}
+
+// 信用取引現在高(二市場計・委託分)の最新値と前週比をExcelから抽出する
+async function fetchMarginBalance() {
+  const xlsUrl = await findLatestMarginXlsUrl();
+  const xlsRes = await fetch(xlsUrl, { headers: MARGIN_BROWSER_HEADERS });
+  if (!xlsRes.ok) throw new Error(`信用取引現在高Excelの取得に失敗しました (HTTP ${xlsRes.status})`);
+  const buffer = await xlsRes.arrayBuffer();
+
+  const workbook = XLSX.read(new Uint8Array(buffer), { type: "array" });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
+
+  const titleRow = rows[0]?.[0] || "";
+  const dateMatch = String(titleRow).match(/(\d{4}\/\d{1,2}\/\d{1,2})/);
+  const asOfDate = dateMatch ? dateMatch[1] : null;
+
+  const totalRowIdx = rows.findIndex((row) => row.some((cell) => typeof cell === "string" && cell.includes("二市場計")));
+  if (totalRowIdx < 0) throw new Error("「二市場計」の行が見つかりません");
+  const valueRow = rows[totalRowIdx + 1];
+  if (!valueRow || !valueRow.some((cell) => typeof cell === "string" && cell.includes("金額"))) {
+    throw new Error("金額(百万円)の行が見つかりません");
+  }
+
+  // 列位置: [.., "金額Val.", 委託売残高, 前週比, 委託買残高, 前週比, ...] (単位: 百万円)
+  const buyBalanceMil = valueRow[5];
+  const buyChangeMil = valueRow[6];
+  if (typeof buyBalanceMil !== "number" || typeof buyChangeMil !== "number") {
+    throw new Error("信用買い残高の数値が想定形式と異なります");
+  }
+
+  return { asOfDate, buyBalanceOku: buyBalanceMil / 100, buyChangeOku: buyChangeMil / 100 };
+}
+
+// JPXのデータは週次更新のため、頻繁な再取得を避けて半日キャッシュする
+async function fetchMarginBalanceCached() {
+  const cache = caches.default;
+  const cacheKey = new Request("https://internal-cache.example/margin-balance-cache-key");
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached.json();
+
+  const data = await fetchMarginBalance();
+  const response = new Response(JSON.stringify(data), {
+    headers: { "content-type": "application/json", "Cache-Control": "public, max-age=43200" },
+  });
+  await cache.put(cacheKey, response);
+  return data;
+}
+
+function scoreMarginBuying(margin) {
+  const pctChange = (margin.buyChangeOku / (margin.buyBalanceOku - margin.buyChangeOku)) * 100;
+
+  // 信用買い残の増加は将来の戻り待ち売り圧力の積み上がりとして弱気材料、
+  // 減少は売り圧力の後退として強気材料とみなし、符号を反転する
+  const score = -pctChange * 30;
+
+  const oku = Math.round(margin.buyBalanceOku).toLocaleString("ja-JP");
+  const chg = Math.round(margin.buyChangeOku).toLocaleString("ja-JP");
+  const detail = `信用買い残(委託) ${oku}億円(前週比${margin.buyChangeOku >= 0 ? "+" : ""}${chg}億円、${margin.asOfDate}申込み現在)`;
+  return component("margin", "信用買い残", score, detail);
 }
 
 function scoreTrend(closes) {
@@ -254,11 +337,12 @@ function labelForScore(score) {
 }
 
 export async function computeSignal() {
-  const [nikkei, futures, fx, vix] = await Promise.all([
+  const [nikkei, futures, fx, vix, margin] = await Promise.all([
     fetchChart(NIKKEI_TICKER, { range: "8mo" }),
     fetchChartSafe(NIKKEI_FUTURES_TICKER, { range: "8mo" }),
     fetchChart(FX_TICKER, { range: "5d" }),
     fetchChart(VIX_TICKER, { range: "5d" }),
+    fetchMarginBalanceCached().catch(() => null),
   ]);
 
   const closes = nikkei.closes;
@@ -270,6 +354,7 @@ export async function computeSignal() {
     scoreFx(fx.closes),
     scoreVix(vix.closes),
   ];
+  if (margin) components.push(scoreMarginBuying(margin));
 
   const composite = clip(weightedComposite(components));
   const [label, polarity] = labelForScore(composite);
