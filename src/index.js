@@ -4,8 +4,11 @@
  */
 
 const NIKKEI_TICKER = "^N225";
+const NIKKEI_FUTURES_TICKER = "NIY=F"; // CME日経225先物(円建て) — トレンド/RSI/MACDの算出元
 const FX_TICKER = "JPY=X";
 const VIX_TICKER = "^VIX";
+
+const INDICATOR_MIN_LEN = 75; // SMA75に必要な最低本数(これ未満の先物データしかない場合は現物にフォールバック)
 
 const WEIGHTS = {
   trend: 0.35,
@@ -120,6 +123,16 @@ async function fetchChart(ticker, params) {
     closes.push(closesRaw[i]);
   }
   return { dates, closes };
+}
+
+// 先物は上場前の期間だとHTTPエラーになるため、失敗時は空データを返して
+// 呼び出し側で現物データへのフォールバックを行えるようにする
+async function fetchChartSafe(ticker, params) {
+  try {
+    return await fetchChart(ticker, params);
+  } catch (err) {
+    return { dates: [], closes: [] };
+  }
 }
 
 function scoreTrend(closes) {
@@ -241,17 +254,19 @@ function labelForScore(score) {
 }
 
 export async function computeSignal() {
-  const [nikkei, fx, vix] = await Promise.all([
+  const [nikkei, futures, fx, vix] = await Promise.all([
     fetchChart(NIKKEI_TICKER, { range: "8mo" }),
+    fetchChartSafe(NIKKEI_FUTURES_TICKER, { range: "8mo" }),
     fetchChart(FX_TICKER, { range: "5d" }),
     fetchChart(VIX_TICKER, { range: "5d" }),
   ]);
 
   const closes = nikkei.closes;
+  const indicatorCloses = futures.closes.length >= INDICATOR_MIN_LEN ? futures.closes : closes;
   const components = [
-    scoreTrend(closes),
-    scoreRsi(closes),
-    scoreMacd(closes),
+    scoreTrend(indicatorCloses),
+    scoreRsi(indicatorCloses),
+    scoreMacd(indicatorCloses),
     scoreFx(fx.closes),
     scoreVix(vix.closes),
   ];
@@ -296,8 +311,9 @@ function findIndexUpTo(dates, dateStr) {
 }
 
 export async function computeHistory(days = 30) {
-  const [nikkei, fx, vix] = await Promise.all([
+  const [nikkei, futures, fx, vix] = await Promise.all([
     fetchChart(NIKKEI_TICKER, { range: "8mo" }),
+    fetchChartSafe(NIKKEI_FUTURES_TICKER, { range: "8mo" }),
     fetchChart(FX_TICKER, { range: "6mo" }),
     fetchChart(VIX_TICKER, { range: "6mo" }),
   ]);
@@ -305,7 +321,7 @@ export async function computeHistory(days = 30) {
   const closes = nikkei.closes;
   const dates = nikkei.dates;
 
-  const minIdx = 75; // SMA75に必要な最低本数
+  const minIdx = INDICATOR_MIN_LEN;
   const startIdx = Math.max(minIdx, closes.length - days);
 
   const history = [];
@@ -317,10 +333,13 @@ export async function computeHistory(days = 30) {
     const vixIdx = findIndexUpTo(vix.dates, d);
     if (fxIdx < 1 || vixIdx < 1) continue;
 
+    const futuresIdx = findIndexUpTo(futures.dates, d);
+    const indicatorCloses = futuresIdx >= INDICATOR_MIN_LEN ? futures.closes.slice(0, futuresIdx + 1) : sliceCloses;
+
     const components = [
-      scoreTrend(sliceCloses),
-      scoreRsi(sliceCloses),
-      scoreMacd(sliceCloses),
+      scoreTrend(indicatorCloses),
+      scoreRsi(indicatorCloses),
+      scoreMacd(indicatorCloses),
       scoreFx(fx.closes.slice(0, fxIdx + 1)),
       scoreVix(vix.closes.slice(0, vixIdx + 1)),
     ];
@@ -350,8 +369,9 @@ export async function computeCrashWindow(centerDateStr, beforeDays = 7, afterDay
   const period2 = centerUnix + (afterDays + 10) * DAY;
   const fxPeriod1 = centerUnix - 60 * DAY;
 
-  const [nikkei, fx, vix] = await Promise.all([
+  const [nikkei, futures, fx, vix] = await Promise.all([
     fetchChart(NIKKEI_TICKER, { period1: nikkeiPeriod1, period2 }),
+    fetchChartSafe(NIKKEI_FUTURES_TICKER, { period1: nikkeiPeriod1, period2 }),
     fetchChart(FX_TICKER, { period1: fxPeriod1, period2 }),
     fetchChart(VIX_TICKER, { period1: fxPeriod1, period2 }),
   ]);
@@ -374,10 +394,13 @@ export async function computeCrashWindow(centerDateStr, beforeDays = 7, afterDay
     const vixIdx = findIndexUpTo(vix.dates, d);
     if (fxIdx < 1 || vixIdx < 1) continue;
 
+    const futuresIdx = findIndexUpTo(futures.dates, d);
+    const indicatorCloses = futuresIdx >= INDICATOR_MIN_LEN ? futures.closes.slice(0, futuresIdx + 1) : sliceCloses;
+
     const components = [
-      scoreTrend(sliceCloses),
-      scoreRsi(sliceCloses),
-      scoreMacd(sliceCloses),
+      scoreTrend(indicatorCloses),
+      scoreRsi(indicatorCloses),
+      scoreMacd(indicatorCloses),
       scoreFx(fx.closes.slice(0, fxIdx + 1)),
       scoreVix(vix.closes.slice(0, vixIdx + 1)),
     ];
