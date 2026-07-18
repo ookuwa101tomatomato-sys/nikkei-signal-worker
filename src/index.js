@@ -4,22 +4,15 @@
  */
 
 const NIKKEI_TICKER = "^N225";
-const DOW_TICKER = "^DJI";
-const SP500_TICKER = "^GSPC";
 const FX_TICKER = "JPY=X";
 const VIX_TICKER = "^VIX";
-const NIKKEI_FUTURES_TICKER = "NIY=F"; // CME日経225先物(円建て)
-const SOX_TICKER = "^SOX"; // フィラデルフィア半導体指数
 
 const WEIGHTS = {
-  trend: 0.24,
-  rsi: 0.10,
-  macd: 0.15,
-  us_market: 0.13,
-  fx: 0.11,
-  vix: 0.08,
-  nikkei_futures: 0.12,
-  sox: 0.07,
+  trend: 0.35,
+  rsi: 0.15,
+  macd: 0.22,
+  fx: 0.16,
+  vix: 0.12,
 };
 
 function clip(value, lo = -100, hi = 100) {
@@ -129,16 +122,6 @@ async function fetchChart(ticker, params) {
   return { dates, closes };
 }
 
-// 先物など、取得期間によっては存在しない(HTTPエラーになる)ティッカー用。
-// 失敗時は空データを返し、呼び出し側でその指標を除外して合成スコアを計算する。
-async function fetchChartSafe(ticker, params) {
-  try {
-    return await fetchChart(ticker, params);
-  } catch (err) {
-    return { dates: [], closes: [] };
-  }
-}
-
 function scoreTrend(closes) {
   const sma5 = sma(closes, 5);
   const sma25 = sma(closes, 25);
@@ -209,15 +192,6 @@ function pctChangeLast(closes) {
   return (b / a - 1) * 100;
 }
 
-function scoreUsMarket(dowCloses, spCloses) {
-  const dowChg = pctChangeLast(dowCloses);
-  const spChg = pctChangeLast(spCloses);
-  const avgChg = (dowChg + spChg) / 2;
-  const score = avgChg * 40;
-  const detail = `NYダウ ${dowChg >= 0 ? "+" : ""}${dowChg.toFixed(2)}% / S&P500 ${spChg >= 0 ? "+" : ""}${spChg.toFixed(2)}%(前営業日比)`;
-  return component("us_market", "米国市場の動き", score, detail);
-}
-
 function scoreFx(fxCloses) {
   const fxChg = pctChangeLast(fxCloses);
   const score = fxChg * 50;
@@ -248,24 +222,6 @@ function scoreVix(vixCloses) {
   return component("vix", "VIX(恐怖指数)", score, detail);
 }
 
-function scoreNikkeiFutures(nikkeiCashCloses, futuresCloses) {
-  const cashClose = last(nikkeiCashCloses);
-  const futuresClose = last(futuresCloses);
-  const diffPct = (futuresClose / cashClose - 1) * 100;
-  const score = diffPct * 20;
-  const detail = `CME日経225先物 ${Math.round(futuresClose).toLocaleString("ja-JP")}円(現物比${diffPct >= 0 ? "+" : ""}${diffPct.toFixed(2)}%)`;
-  return component("nikkei_futures", "日経225先物(CME)", score, detail);
-}
-
-function scoreSox(soxCloses) {
-  const chg = pctChangeLast(soxCloses);
-  const score = chg * 25;
-  const detail = `SOX半導体指数 ${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%(前営業日比、半導体関連株に影響)`;
-  return component("sox", "SOX半導体指数", score, detail);
-}
-
-// 一部の指標(先物など)は取得期間外だと欠損することがあるため、
-// 実際に揃った指標の重みだけで正規化して合成スコアを計算する
 function weightedComposite(components) {
   let sum = 0;
   let weightSum = 0;
@@ -285,14 +241,10 @@ function labelForScore(score) {
 }
 
 export async function computeSignal() {
-  const [nikkei, dow, sp, fx, vix, futures, sox] = await Promise.all([
+  const [nikkei, fx, vix] = await Promise.all([
     fetchChart(NIKKEI_TICKER, { range: "8mo" }),
-    fetchChart(DOW_TICKER, { range: "5d" }),
-    fetchChart(SP500_TICKER, { range: "5d" }),
     fetchChart(FX_TICKER, { range: "5d" }),
     fetchChart(VIX_TICKER, { range: "5d" }),
-    fetchChartSafe(NIKKEI_FUTURES_TICKER, { range: "5d" }),
-    fetchChartSafe(SOX_TICKER, { range: "5d" }),
   ]);
 
   const closes = nikkei.closes;
@@ -300,11 +252,8 @@ export async function computeSignal() {
     scoreTrend(closes),
     scoreRsi(closes),
     scoreMacd(closes),
-    scoreUsMarket(dow.closes, sp.closes),
     scoreFx(fx.closes),
     scoreVix(vix.closes),
-    scoreNikkeiFutures(closes, futures.closes),
-    scoreSox(sox.closes),
   ];
 
   const composite = clip(weightedComposite(components));
@@ -347,14 +296,10 @@ function findIndexUpTo(dates, dateStr) {
 }
 
 export async function computeHistory(days = 30) {
-  const [nikkei, dow, sp, fx, vix, futures, sox] = await Promise.all([
+  const [nikkei, fx, vix] = await Promise.all([
     fetchChart(NIKKEI_TICKER, { range: "8mo" }),
-    fetchChart(DOW_TICKER, { range: "6mo" }),
-    fetchChart(SP500_TICKER, { range: "6mo" }),
     fetchChart(FX_TICKER, { range: "6mo" }),
     fetchChart(VIX_TICKER, { range: "6mo" }),
-    fetchChartSafe(NIKKEI_FUTURES_TICKER, { range: "6mo" }),
-    fetchChartSafe(SOX_TICKER, { range: "6mo" }),
   ]);
 
   const closes = nikkei.closes;
@@ -368,24 +313,17 @@ export async function computeHistory(days = 30) {
     const d = dates[i];
     const sliceCloses = closes.slice(0, i + 1);
 
-    const dowIdx = findIndexUpTo(dow.dates, d);
-    const spIdx = findIndexUpTo(sp.dates, d);
     const fxIdx = findIndexUpTo(fx.dates, d);
     const vixIdx = findIndexUpTo(vix.dates, d);
-    const futuresIdx = findIndexUpTo(futures.dates, d);
-    const soxIdx = findIndexUpTo(sox.dates, d);
-    if (dowIdx < 1 || spIdx < 1 || fxIdx < 1 || vixIdx < 1) continue;
+    if (fxIdx < 1 || vixIdx < 1) continue;
 
     const components = [
       scoreTrend(sliceCloses),
       scoreRsi(sliceCloses),
       scoreMacd(sliceCloses),
-      scoreUsMarket(dow.closes.slice(0, dowIdx + 1), sp.closes.slice(0, spIdx + 1)),
       scoreFx(fx.closes.slice(0, fxIdx + 1)),
       scoreVix(vix.closes.slice(0, vixIdx + 1)),
     ];
-    if (futuresIdx >= 1) components.push(scoreNikkeiFutures(sliceCloses, futures.closes.slice(0, futuresIdx + 1)));
-    if (soxIdx >= 1) components.push(scoreSox(sox.closes.slice(0, soxIdx + 1)));
 
     const composite = clip(weightedComposite(components));
     const [label, polarity] = labelForScore(composite);
@@ -412,14 +350,10 @@ export async function computeCrashWindow(centerDateStr, beforeDays = 7, afterDay
   const period2 = centerUnix + (afterDays + 10) * DAY;
   const fxPeriod1 = centerUnix - 60 * DAY;
 
-  const [nikkei, dow, sp, fx, vix, futures, sox] = await Promise.all([
+  const [nikkei, fx, vix] = await Promise.all([
     fetchChart(NIKKEI_TICKER, { period1: nikkeiPeriod1, period2 }),
-    fetchChart(DOW_TICKER, { period1: fxPeriod1, period2 }),
-    fetchChart(SP500_TICKER, { period1: fxPeriod1, period2 }),
     fetchChart(FX_TICKER, { period1: fxPeriod1, period2 }),
     fetchChart(VIX_TICKER, { period1: fxPeriod1, period2 }),
-    fetchChartSafe(NIKKEI_FUTURES_TICKER, { period1: fxPeriod1, period2 }),
-    fetchChartSafe(SOX_TICKER, { period1: fxPeriod1, period2 }),
   ]);
 
   const closes = nikkei.closes;
@@ -436,24 +370,17 @@ export async function computeCrashWindow(centerDateStr, beforeDays = 7, afterDay
     const d = dates[i];
     const sliceCloses = closes.slice(0, i + 1);
 
-    const dowIdx = findIndexUpTo(dow.dates, d);
-    const spIdx = findIndexUpTo(sp.dates, d);
     const fxIdx = findIndexUpTo(fx.dates, d);
     const vixIdx = findIndexUpTo(vix.dates, d);
-    const futuresIdx = findIndexUpTo(futures.dates, d);
-    const soxIdx = findIndexUpTo(sox.dates, d);
-    if (dowIdx < 1 || spIdx < 1 || fxIdx < 1 || vixIdx < 1) continue;
+    if (fxIdx < 1 || vixIdx < 1) continue;
 
     const components = [
       scoreTrend(sliceCloses),
       scoreRsi(sliceCloses),
       scoreMacd(sliceCloses),
-      scoreUsMarket(dow.closes.slice(0, dowIdx + 1), sp.closes.slice(0, spIdx + 1)),
       scoreFx(fx.closes.slice(0, fxIdx + 1)),
       scoreVix(vix.closes.slice(0, vixIdx + 1)),
     ];
-    if (futuresIdx >= 1) components.push(scoreNikkeiFutures(sliceCloses, futures.closes.slice(0, futuresIdx + 1)));
-    if (soxIdx >= 1) components.push(scoreSox(sox.closes.slice(0, soxIdx + 1)));
 
     const composite = clip(weightedComposite(components));
     const [label, polarity] = labelForScore(composite);
