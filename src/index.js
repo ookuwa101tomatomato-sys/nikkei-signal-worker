@@ -182,14 +182,21 @@ async function fetchMarginBalance() {
     throw new Error("金額(百万円)の行が見つかりません");
   }
 
-  // 列位置: [.., "金額Val.", 委託売残高, 前週比, 委託買残高, 前週比, ...] (単位: 百万円)
+  // 列位置: [.., "金額Val.", 委託売残高, 前週比, 委託買残高, 前週比, 自己売残高, 前週比, 自己買残高, 前週比, 合計売残高, 前週比, 合計買残高, 前週比] (単位: 百万円)
   const buyBalanceMil = valueRow[5];
   const buyChangeMil = valueRow[6];
+  const totalSellMil = valueRow[11];
+  const totalBuyMil = valueRow[13];
   if (typeof buyBalanceMil !== "number" || typeof buyChangeMil !== "number") {
     throw new Error("信用買い残高の数値が想定形式と異なります");
   }
 
-  return { asOfDate, buyBalanceOku: buyBalanceMil / 100, buyChangeOku: buyChangeMil / 100 };
+  // 信用倍率(貸借倍率) = 合計買残高 ÷ 合計売残高。株温計等で一般的に使われる定義に合わせる
+  const ratio = typeof totalBuyMil === "number" && typeof totalSellMil === "number" && totalSellMil > 0
+    ? totalBuyMil / totalSellMil
+    : null;
+
+  return { asOfDate, buyBalanceOku: buyBalanceMil / 100, buyChangeOku: buyChangeMil / 100, ratio };
 }
 
 // JPXのデータは週次更新のため、頻繁な再取得を避けて半日キャッシュする
@@ -289,16 +296,32 @@ function scoreForeignFlow(flow) {
   return component("foreign_flow", "海外投資家動向", score, detail);
 }
 
+function marginRatioLevel(ratio) {
+  if (ratio >= 8) return ["高水準", -15];
+  if (ratio >= 6) return ["やや高水準", -5];
+  if (ratio > 3) return ["中立", 0];
+  if (ratio > 1) return ["低水準", 10];
+  return ["売り長(底値圏の可能性)", 20];
+}
+
 function scoreMarginBuying(margin) {
   const pctChange = (margin.buyChangeOku / (margin.buyBalanceOku - margin.buyChangeOku)) * 100;
 
   // 信用買い残の増加は将来の戻り待ち売り圧力の積み上がりとして弱気材料、
   // 減少は売り圧力の後退として強気材料とみなし、符号を反転する
-  const score = -pctChange * 30;
+  let score = -pctChange * 25;
 
   const oku = Math.round(margin.buyBalanceOku).toLocaleString("ja-JP");
   const chg = Math.round(margin.buyChangeOku).toLocaleString("ja-JP");
-  const detail = `信用買い残(委託) ${oku}億円(前週比${margin.buyChangeOku >= 0 ? "+" : ""}${chg}億円、${margin.asOfDate}申込み現在)`;
+  let detail = `信用買い残(委託) ${oku}億円(前週比${margin.buyChangeOku >= 0 ? "+" : ""}${chg}億円、${margin.asOfDate}申込み現在)`;
+
+  // 信用倍率(合計買残高÷合計売残高)が高いほど将来の売り圧力の積み上がりとして弱気材料に加点する
+  if (typeof margin.ratio === "number") {
+    const [levelLabel, levelScore] = marginRatioLevel(margin.ratio);
+    score += levelScore;
+    detail += ` — 信用倍率${margin.ratio.toFixed(2)}倍(${levelLabel})`;
+  }
+
   return component("margin", "信用買い残", score, detail);
 }
 
