@@ -202,7 +202,7 @@ async function fetchMarginBalance() {
 // JPXのデータは週次更新のため、頻繁な再取得を避けて半日キャッシュする
 async function fetchMarginBalanceCached() {
   const cache = caches.default;
-  const cacheKey = new Request("https://internal-cache.example/margin-balance-cache-key");
+  const cacheKey = new Request("https://internal-cache.example/margin-balance-cache-key-v2");
   const cached = await cache.match(cacheKey);
   if (cached) return cached.json();
 
