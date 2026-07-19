@@ -297,11 +297,11 @@ function scoreForeignFlow(flow) {
 }
 
 function marginRatioLevel(ratio) {
-  if (ratio >= 8) return ["高水準", -15];
-  if (ratio >= 6) return ["やや高水準", -5];
+  if (ratio >= 8) return ["高水準", -30];
+  if (ratio >= 6) return ["やや高水準", -10];
   if (ratio > 3) return ["中立", 0];
-  if (ratio > 1) return ["低水準", 10];
-  return ["売り長(底値圏の可能性)", 20];
+  if (ratio > 1) return ["低水準", 20];
+  return ["売り長(底値圏の可能性)", 40];
 }
 
 function scoreMarginBuying(margin) {
