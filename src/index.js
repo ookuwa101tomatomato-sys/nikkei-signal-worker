@@ -11,17 +11,19 @@ const FX_TICKER = "JPY=X";
 const VIX_TICKER = "^VIX";
 const MARGIN_PAGE_URL = "https://www.jpx.co.jp/markets/statistics-equities/margin/04.html"; // 信用取引現在高(JPX公式、週次)
 const INVESTOR_TYPE_PAGE_URL = "https://www.jpx.co.jp/markets/statistics-equities/investor-type/index.html"; // 投資部門別売買状況(JPX公式、週次)
+const NIKKEIYOSOKU_URL = "https://nikkeiyosoku.com/"; // 投資の森「日経平均AI予想」(robots.txtでClaudeBotを明示的に許可、Crawl-delay:10秒)
 
 const INDICATOR_MIN_LEN = 75; // SMA75に必要な最低本数(これ未満の先物データしかない場合は現物にフォールバック)
 
 const WEIGHTS = {
-  trend: 0.29,
-  rsi: 0.12,
-  macd: 0.18,
-  fx: 0.13,
-  vix: 0.10,
-  margin: 0.09,
-  foreign_flow: 0.09,
+  trend: 0.27,
+  rsi: 0.11,
+  macd: 0.17,
+  fx: 0.12,
+  vix: 0.09,
+  margin: 0.08,
+  foreign_flow: 0.08,
+  ai_forecast: 0.08,
 };
 
 function clip(value, lo = -100, hi = 100) {
@@ -296,6 +298,46 @@ function scoreForeignFlow(flow) {
   return component("foreign_flow", "海外投資家動向", score, detail);
 }
 
+// 投資の森(nikkeiyosoku.com)の「日経平均AI予想」欄から日付・上昇/下落判定・予想値を抽出する
+async function fetchAiForecast() {
+  const res = await fetch(NIKKEIYOSOKU_URL, { headers: MARGIN_BROWSER_HEADERS });
+  if (!res.ok) throw new Error(`投資の森ページ取得に失敗しました (HTTP ${res.status})`);
+  const html = await res.text();
+
+  const match = html.match(
+    /日経平均&nbsp;<span class="time-txt">([^<]+)<\/span><\/h4>[\s\S]{0,200}?class="(fall|rise)-box-side">([^<]+)<span>予想<\/span><\/p>[\s\S]{0,150}?class="forecast-txt-side">([^<]+)<\/p>/
+  );
+  if (!match) throw new Error("日経平均AI予想の欄が見つかりません");
+
+  const [, date, directionClass, directionLabel, forecastValueText] = match;
+  const forecastValue = Number(forecastValueText.replace(/,/g, ""));
+  if (!Number.isFinite(forecastValue)) throw new Error("AI予想値が想定形式と異なります");
+
+  return { date, direction: directionClass, directionLabel, forecastValue };
+}
+
+// nikkeiyosoku.comは毎日朝更新のため、頻繁な再取得を避けて1時間キャッシュする(robots.txtのCrawl-delayにも配慮)
+async function fetchAiForecastCached() {
+  const cache = caches.default;
+  const cacheKey = new Request("https://internal-cache.example/ai-forecast-cache-key");
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached.json();
+
+  const data = await fetchAiForecast();
+  const response = new Response(JSON.stringify(data), {
+    headers: { "content-type": "application/json", "Cache-Control": "public, max-age=3600" },
+  });
+  await cache.put(cacheKey, response);
+  return data;
+}
+
+function scoreAiForecast(forecast) {
+  // サイトが公表する判定(下落予想/上昇予想)をそのまま方向として使う(固定幅のバイナリスコア)
+  const score = forecast.direction === "rise" ? 40 : -40;
+  const detail = `投資の森AI予想 ${forecast.date}: ${forecast.directionLabel}予想(予想値${Math.round(forecast.forecastValue).toLocaleString("ja-JP")}円)`;
+  return component("ai_forecast", "他社AI予想(投資の森)", score, detail);
+}
+
 function marginRatioLevel(ratio) {
   if (ratio >= 8) return ["高水準", -30];
   if (ratio >= 6) return ["やや高水準", -10];
@@ -444,13 +486,14 @@ function labelForScore(score) {
 }
 
 export async function computeSignal() {
-  const [nikkei, futures, fx, vix, margin, foreignFlow] = await Promise.all([
+  const [nikkei, futures, fx, vix, margin, foreignFlow, aiForecast] = await Promise.all([
     fetchChart(NIKKEI_TICKER, { range: "8mo" }),
     fetchChartSafe(NIKKEI_FUTURES_TICKER, { range: "8mo" }),
     fetchChart(FX_TICKER, { range: "5d" }),
     fetchChart(VIX_TICKER, { range: "5d" }),
     fetchMarginBalanceCached().catch(() => null),
     fetchForeignFlowCached().catch(() => null),
+    fetchAiForecastCached().catch(() => null),
   ]);
 
   const closes = nikkei.closes;
@@ -464,6 +507,7 @@ export async function computeSignal() {
   ];
   if (margin) components.push(scoreMarginBuying(margin));
   if (foreignFlow) components.push(scoreForeignFlow(foreignFlow));
+  if (aiForecast) components.push(scoreAiForecast(aiForecast));
 
   const composite = clip(weightedComposite(components));
   const [label, polarity] = labelForScore(composite);
