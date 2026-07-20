@@ -235,6 +235,13 @@ html, body {
 .meter-scale .down-text { color: var(--down); font-weight: 600; }
 .meter-scale .muted-text { color: var(--text-muted); }
 
+.meter-note {
+  margin: 10px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
 /* ---- Sparkline ---- */
 .sparkline-wrap {
   position: relative;
