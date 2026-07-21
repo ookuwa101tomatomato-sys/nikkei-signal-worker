@@ -411,11 +411,42 @@
     hit.addEventListener("pointerleave", handleLeave);
   }
 
+  function renderSurpriseList(history) {
+    const list = document.getElementById("surpriseList");
+    if (!list) return;
+    list.innerHTML = "";
+    const notable = history.filter((r) => typeof r.change_pct === "number" && Math.abs(r.change_pct) >= SURPRISE_THRESHOLD);
+    if (notable.length === 0) {
+      list.hidden = true;
+      return;
+    }
+    list.hidden = false;
+    notable
+      .slice()
+      .reverse()
+      .forEach((r) => {
+        const isUp = r.change_pct > 0;
+        const item = document.createElement("div");
+        item.className = "surprise-item " + (isUp ? "up" : "down");
+        const md = r.date.slice(5).replace("-", "/");
+        item.textContent = (isUp ? "▲ " : "▼ ") + md + " " + (isUp ? "急騰" : "急落") + "(" + (isUp ? "+" : "") + r.change_pct + "%)";
+        list.appendChild(item);
+      });
+  }
+
+  // キャッシュを避けて必ずサーバーへ再取得しにいくためのクエリ
+  function cacheBust(url) {
+    return url + (url.includes("?") ? "&" : "?") + "_=" + Date.now();
+  }
+
   async function loadSignal() {
     const updatedEl = document.getElementById("updated");
     updatedEl.textContent = "更新中…";
     try {
-      const [signalRes, historyRes] = await Promise.all([fetch("/api/signal"), fetch("/api/history?days=30")]);
+      const [signalRes, historyRes] = await Promise.all([
+        fetch(cacheBust("/api/signal"), { cache: "no-store" }),
+        fetch(cacheBust("/api/history?days=30"), { cache: "no-store" }),
+      ]);
       const data = await signalRes.json();
       if (!data.ok) throw new Error(data.error || "取得エラー");
 
@@ -426,6 +457,7 @@
       const historyData = await historyRes.json();
       if (historyData.ok) {
         drawChart("historyChart", "historyWrap", "historyTooltip", historyData.history, { showSurpriseMarkers: true });
+        renderSurpriseList(historyData.history);
       }
 
       const updated = new Date(data.updated_at);
@@ -498,4 +530,10 @@
 
   loadSignal();
   loadCrash();
+
+  // 手動更新を待たずに最新状態へ追従できるよう、定期的に再取得する
+  setInterval(loadSignal, 5 * 60 * 1000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") loadSignal();
+  });
 })();

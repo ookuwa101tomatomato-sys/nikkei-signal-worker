@@ -242,6 +242,21 @@ html, body {
   line-height: 1.5;
 }
 
+.surprise-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--gridline);
+}
+.surprise-item {
+  font-size: 12px;
+  font-weight: 600;
+}
+.surprise-item.up { color: var(--up); }
+.surprise-item.down { color: var(--down); }
+
 /* ---- Sparkline ---- */
 .sparkline-wrap {
   position: relative;
