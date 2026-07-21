@@ -306,6 +306,27 @@
       svg.appendChild(ring);
     }
 
+    // 重大な価格変動日(前日比±2%以上)を上部(急騰)・下部(急落)にマーク
+    if (options.showSurpriseMarkers) {
+      const SURPRISE_THRESHOLD = 2;
+      const markerSize = 5;
+      rows.forEach((r, i) => {
+        if (typeof r.change_pct !== "number" || Math.abs(r.change_pct) < SURPRISE_THRESHOLD) return;
+        const x = xScale(i);
+        const isUp = r.change_pct > 0;
+        const markerColor = isUp ? upColor : downColor;
+        const marker = document.createElementNS(ns, "path");
+        const tipY = isUp ? pad.top + 4 : height - pad.bottom - 4;
+        const baseY = isUp ? tipY + markerSize * 2 : tipY - markerSize * 2;
+        marker.setAttribute(
+          "d",
+          `M ${x.toFixed(1)} ${tipY.toFixed(1)} L ${(x - markerSize).toFixed(1)} ${baseY.toFixed(1)} L ${(x + markerSize).toFixed(1)} ${baseY.toFixed(1)} Z`
+        );
+        marker.setAttribute("fill", markerColor);
+        svg.appendChild(marker);
+      });
+    }
+
     // 末端マーカー
     const lastRow = rows[rows.length - 1];
     const lastX = xScale(rows.length - 1);
@@ -396,7 +417,7 @@
 
       const historyData = await historyRes.json();
       if (historyData.ok) {
-        drawChart("historyChart", "historyWrap", "historyTooltip", historyData.history);
+        drawChart("historyChart", "historyWrap", "historyTooltip", historyData.history, { showSurpriseMarkers: true });
       }
 
       const updated = new Date(data.updated_at);

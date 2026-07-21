@@ -584,6 +584,7 @@ export async function computeHistory(days = 30) {
 
     const composite = clip(weightedComposite(components));
     const [label, polarity] = labelForScore(composite);
+    const changePct = i > 0 ? (closes[i] / closes[i - 1] - 1) * 100 : null;
 
     history.push({
       date: d,
@@ -591,6 +592,7 @@ export async function computeHistory(days = 30) {
       label,
       polarity,
       close: Math.round(closes[i] * 100) / 100,
+      change_pct: changePct !== null ? Math.round(changePct * 100) / 100 : null,
     });
   }
   return history;
