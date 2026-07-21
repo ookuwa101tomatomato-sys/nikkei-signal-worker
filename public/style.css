@@ -266,6 +266,12 @@ html, body {
 .chart-tooltip .val {
   font-weight: 700;
 }
+.tooltip-badge {
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+.tooltip-badge.up { color: var(--up); }
+.tooltip-badge.down { color: var(--down); }
 
 /* ---- History chart ---- */
 .history-wrap {

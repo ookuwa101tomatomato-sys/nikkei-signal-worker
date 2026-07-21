@@ -18,6 +18,7 @@
   };
 
   const ARROW = { up: "▲", down: "▼", neutral: "●" };
+  const SURPRISE_THRESHOLD = 2; // 前日比±2%以上を「重大な変動日」として扱う
 
   function fmtNumber(n, digits) {
     return Number(n).toLocaleString("ja-JP", {
@@ -308,7 +309,6 @@
 
     // 重大な価格変動日(前日比±2%以上)を上部(急騰)・下部(急落)にマーク
     if (options.showSurpriseMarkers) {
-      const SURPRISE_THRESHOLD = 2;
       const markerSize = 5;
       rows.forEach((r, i) => {
         if (typeof r.change_pct !== "number" || Math.abs(r.change_pct) < SURPRISE_THRESHOLD) return;
@@ -373,6 +373,14 @@
 
       tooltip.hidden = false;
       tooltip.innerHTML = "";
+
+      if (options.showSurpriseMarkers && typeof point.change_pct === "number" && Math.abs(point.change_pct) >= SURPRISE_THRESHOLD) {
+        const badgeDiv = document.createElement("div");
+        badgeDiv.className = "tooltip-badge " + (point.change_pct > 0 ? "up" : "down");
+        badgeDiv.textContent = (point.change_pct > 0 ? "▲ 急騰日" : "▼ 急落日") + "(重大な変動)";
+        tooltip.appendChild(badgeDiv);
+      }
+
       const dateDiv = document.createElement("div");
       dateDiv.textContent = point.date + (point.is_center ? " ★" : "");
       const valDiv = document.createElement("div");
