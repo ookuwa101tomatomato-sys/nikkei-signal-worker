@@ -723,7 +723,7 @@ export default {
     if (url.pathname === "/api/history") {
       const days = Math.max(5, Math.min(90, parseInt(url.searchParams.get("days") || "30", 10) || 30));
       const cache = caches.default;
-      const cacheKey = new Request(url.origin + "/api/history-cache-key-v2?days=" + days, request);
+      const cacheKey = new Request(url.origin + "/api/history-cache-key-v3?days=" + days, request);
       const cached = await cache.match(cacheKey);
       if (cached) return cached;
 
