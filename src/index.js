@@ -130,6 +130,24 @@ async function fetchChart(ticker, params) {
     dates.push(new Date(localMs).toISOString().slice(0, 10));
     closes.push(closesRaw[i]);
   }
+
+  // 当日分の終値がまだ確定していない(close: null)場合、取引時間中のライブ気配値を暫定値として補う
+  const meta = result.meta || {};
+  const lastIdx = timestamps.length - 1;
+  if (
+    lastIdx >= 0 &&
+    (closesRaw[lastIdx] === null || closesRaw[lastIdx] === undefined) &&
+    typeof meta.regularMarketPrice === "number" &&
+    typeof meta.regularMarketTime === "number"
+  ) {
+    const liveDate = new Date((meta.regularMarketTime + gmtoffset) * 1000).toISOString().slice(0, 10);
+    const rawDate = new Date((timestamps[lastIdx] + gmtoffset) * 1000).toISOString().slice(0, 10);
+    if (liveDate === rawDate && (dates.length === 0 || dates[dates.length - 1] !== liveDate)) {
+      dates.push(liveDate);
+      closes.push(meta.regularMarketPrice);
+    }
+  }
+
   return { dates, closes };
 }
 
