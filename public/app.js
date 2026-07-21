@@ -428,8 +428,22 @@
         const isUp = r.change_pct > 0;
         const item = document.createElement("div");
         item.className = "surprise-item " + (isUp ? "up" : "down");
+
+        const label = document.createElement("span");
         const md = r.date.slice(5).replace("-", "/");
-        item.textContent = (isUp ? "▲ " : "▼ ") + md + " " + (isUp ? "急騰" : "急落") + "(" + (isUp ? "+" : "") + r.change_pct + "%)";
+        label.textContent = (isUp ? "▲ " : "▼ ") + md + " " + (isUp ? "急騰" : "急落") + "(" + (isUp ? "+" : "") + r.change_pct + "%)";
+        item.appendChild(label);
+
+        const [y, m, d] = r.date.split("-");
+        const query = encodeURIComponent(`日経平均 ${y}年${Number(m)}月${Number(d)}日`);
+        const link = document.createElement("a");
+        link.className = "surprise-news-link";
+        link.href = "https://news.yahoo.co.jp/search?p=" + query;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = "ニュースを見る ↗";
+        item.appendChild(link);
+
         list.appendChild(item);
       });
   }
