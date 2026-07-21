@@ -18,7 +18,6 @@
   };
 
   const ARROW = { up: "▲", down: "▼", neutral: "●" };
-  const SURPRISE_THRESHOLD = 2; // 前日比±2%以上を「重大な変動日」として扱う
 
   function fmtNumber(n, digits) {
     return Number(n).toLocaleString("ja-JP", {
@@ -384,43 +383,6 @@
     hit.addEventListener("pointerleave", handleLeave);
   }
 
-  function renderSurpriseList(history) {
-    const list = document.getElementById("surpriseList");
-    if (!list) return;
-    list.innerHTML = "";
-    const notable = history.filter((r) => typeof r.change_pct === "number" && Math.abs(r.change_pct) >= SURPRISE_THRESHOLD);
-    if (notable.length === 0) {
-      list.hidden = true;
-      return;
-    }
-    list.hidden = false;
-    notable
-      .slice()
-      .reverse()
-      .forEach((r) => {
-        const isUp = r.change_pct > 0;
-        const item = document.createElement("div");
-        item.className = "surprise-item " + (isUp ? "up" : "down");
-
-        const label = document.createElement("span");
-        const md = r.date.slice(5).replace("-", "/");
-        label.textContent = (isUp ? "▲ " : "▼ ") + md + " " + (isUp ? "急騰" : "急落") + "(" + (isUp ? "+" : "") + r.change_pct + "%)";
-        item.appendChild(label);
-
-        const [y, m, d] = r.date.split("-");
-        const query = encodeURIComponent(`日経平均 ${y}年${Number(m)}月${Number(d)}日`);
-        const link = document.createElement("a");
-        link.className = "surprise-news-link";
-        link.href = "https://news.yahoo.co.jp/search?p=" + query;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        link.textContent = "ニュースを見る ↗";
-        item.appendChild(link);
-
-        list.appendChild(item);
-      });
-  }
-
   // キャッシュを避けて必ずサーバーへ再取得しにいくためのクエリ
   function cacheBust(url) {
     return url + (url.includes("?") ? "&" : "?") + "_=" + Date.now();
@@ -444,7 +406,6 @@
       const historyData = await historyRes.json();
       if (historyData.ok) {
         drawChart("historyChart", "historyWrap", "historyTooltip", historyData.history);
-        renderSurpriseList(historyData.history);
       }
 
       const updated = new Date(data.updated_at);
