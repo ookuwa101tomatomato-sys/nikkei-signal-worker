@@ -753,7 +753,7 @@ export default {
 
     if (url.pathname === "/api/signal") {
       const cache = caches.default;
-      const cacheKey = new Request(url.origin + "/api/signal-cache-key-v2", request);
+      const cacheKey = new Request(url.origin + "/api/signal-cache-key-v3", request);
       const cached = await cache.match(cacheKey);
       if (cached) return cached;
 
