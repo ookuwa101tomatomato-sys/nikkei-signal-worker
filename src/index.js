@@ -360,7 +360,7 @@ function marginRatioLevel(ratio) {
   // 信用倍率5倍を基準とし、高いほど売り圧力の積み上がり(下落要因)、
   // 低いほど売り長(上昇要因)とみなして基準からの乖離に応じて連続的に加減点する
   const diff = ratio - 5;
-  const score = Math.max(-50, Math.min(50, -diff * 10));
+  const score = Math.max(-100, Math.min(100, -diff * 20));
   let label;
   if (diff >= 3) label = "高水準";
   else if (diff >= 1) label = "やや高水準";
