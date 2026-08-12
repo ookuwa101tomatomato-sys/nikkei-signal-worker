@@ -357,11 +357,17 @@ function scoreAiForecast(forecast) {
 }
 
 function marginRatioLevel(ratio) {
-  if (ratio >= 8) return ["高水準", -30];
-  if (ratio >= 6) return ["やや高水準", -10];
-  if (ratio > 3) return ["中立", 0];
-  if (ratio > 1) return ["低水準", 20];
-  return ["売り長(底値圏の可能性)", 40];
+  // 信用倍率5倍を基準とし、高いほど売り圧力の積み上がり(下落要因)、
+  // 低いほど売り長(上昇要因)とみなして基準からの乖離に応じて連続的に加減点する
+  const diff = ratio - 5;
+  const score = Math.max(-50, Math.min(50, -diff * 10));
+  let label;
+  if (diff >= 3) label = "高水準";
+  else if (diff >= 1) label = "やや高水準";
+  else if (diff > -1) label = "中立(5倍近辺)";
+  else if (diff > -3) label = "低水準";
+  else label = "売り長(底値圏の可能性)";
+  return [label, score];
 }
 
 function scoreMarginBuying(margin) {
