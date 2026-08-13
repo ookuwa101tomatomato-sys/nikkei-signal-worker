@@ -203,12 +203,12 @@ async function fetchMarginBalance() {
   }
 
   // 列位置: [.., "金額Val.", 委託売残高, 前週比, 委託買残高, 前週比, 自己売残高, 前週比, 自己買残高, 前週比, 合計売残高, 前週比, 合計買残高, 前週比] (単位: 百万円)
-  const buyBalanceMil = valueRow[5];
-  const buyChangeMil = valueRow[6];
+  const sellBalanceMil = valueRow[3];
+  const sellChangeMil = valueRow[4];
   const totalSellMil = valueRow[11];
   const totalBuyMil = valueRow[13];
-  if (typeof buyBalanceMil !== "number" || typeof buyChangeMil !== "number") {
-    throw new Error("信用買い残高の数値が想定形式と異なります");
+  if (typeof sellBalanceMil !== "number" || typeof sellChangeMil !== "number") {
+    throw new Error("信用売り残高の数値が想定形式と異なります");
   }
 
   // 信用倍率(貸借倍率) = 合計買残高 ÷ 合計売残高。株温計等で一般的に使われる定義に合わせる
@@ -216,13 +216,13 @@ async function fetchMarginBalance() {
     ? totalBuyMil / totalSellMil
     : null;
 
-  return { asOfDate, buyBalanceOku: buyBalanceMil / 100, buyChangeOku: buyChangeMil / 100, ratio };
+  return { asOfDate, sellBalanceOku: sellBalanceMil / 100, sellChangeOku: sellChangeMil / 100, ratio };
 }
 
 // JPXのデータは週次更新のため、頻繁な再取得を避けて半日キャッシュする
 async function fetchMarginBalanceCached() {
   const cache = caches.default;
-  const cacheKey = new Request("https://internal-cache.example/margin-balance-cache-key-v2");
+  const cacheKey = new Request("https://internal-cache.example/margin-balance-cache-key-v3");
   const cached = await cache.match(cacheKey);
   if (cached) return cached.json();
 
@@ -371,9 +371,9 @@ function marginRatioLevel(ratio) {
 }
 
 function scoreMarginBuying(margin) {
-  const oku = Math.round(margin.buyBalanceOku).toLocaleString("ja-JP");
-  const chg = Math.round(margin.buyChangeOku).toLocaleString("ja-JP");
-  let detail = `信用買い残(委託) ${oku}億円(前週比${margin.buyChangeOku >= 0 ? "+" : ""}${chg}億円、${margin.asOfDate}申込み現在)`;
+  const oku = Math.round(margin.sellBalanceOku).toLocaleString("ja-JP");
+  const chg = Math.round(margin.sellChangeOku).toLocaleString("ja-JP");
+  let detail = `信用売り残(委託) ${oku}億円(前週比${margin.sellChangeOku >= 0 ? "+" : ""}${chg}億円、${margin.asOfDate}申込み現在)`;
 
   // 評価は信用倍率(合計買残高÷合計売残高)のみで行う
   let score = 0;
@@ -383,7 +383,7 @@ function scoreMarginBuying(margin) {
     detail += ` — 信用倍率${margin.ratio.toFixed(2)}倍(${levelLabel})`;
   }
 
-  return component("margin", "信用買い残", score, detail);
+  return component("margin", "信用売り残", score, detail);
 }
 
 function scoreTrend(closes) {
@@ -748,7 +748,7 @@ export default {
 
     if (url.pathname === "/api/signal") {
       const cache = caches.default;
-      const cacheKey = new Request(url.origin + "/api/signal-cache-key-v4", request);
+      const cacheKey = new Request(url.origin + "/api/signal-cache-key-v5", request);
       const cached = await cache.match(cacheKey);
       if (cached) return cached;
 
