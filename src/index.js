@@ -371,20 +371,15 @@ function marginRatioLevel(ratio) {
 }
 
 function scoreMarginBuying(margin) {
-  const pctChange = (margin.buyChangeOku / (margin.buyBalanceOku - margin.buyChangeOku)) * 100;
-
-  // 信用買い残の増加は将来の戻り待ち売り圧力の積み上がりとして弱気材料、
-  // 減少は売り圧力の後退として強気材料とみなし、符号を反転する
-  let score = -pctChange * 25;
-
   const oku = Math.round(margin.buyBalanceOku).toLocaleString("ja-JP");
   const chg = Math.round(margin.buyChangeOku).toLocaleString("ja-JP");
   let detail = `信用買い残(委託) ${oku}億円(前週比${margin.buyChangeOku >= 0 ? "+" : ""}${chg}億円、${margin.asOfDate}申込み現在)`;
 
-  // 信用倍率(合計買残高÷合計売残高)が高いほど将来の売り圧力の積み上がりとして弱気材料に加点する
+  // 評価は信用倍率(合計買残高÷合計売残高)のみで行う
+  let score = 0;
   if (typeof margin.ratio === "number") {
     const [levelLabel, levelScore] = marginRatioLevel(margin.ratio);
-    score += levelScore;
+    score = levelScore;
     detail += ` — 信用倍率${margin.ratio.toFixed(2)}倍(${levelLabel})`;
   }
 
@@ -753,7 +748,7 @@ export default {
 
     if (url.pathname === "/api/signal") {
       const cache = caches.default;
-      const cacheKey = new Request(url.origin + "/api/signal-cache-key-v3", request);
+      const cacheKey = new Request(url.origin + "/api/signal-cache-key-v4", request);
       const cached = await cache.match(cacheKey);
       if (cached) return cached;
 
