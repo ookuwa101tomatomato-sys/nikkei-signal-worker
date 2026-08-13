@@ -203,26 +203,24 @@ async function fetchMarginBalance() {
   }
 
   // 列位置: [.., "金額Val.", 委託売残高, 前週比, 委託買残高, 前週比, 自己売残高, 前週比, 自己買残高, 前週比, 合計売残高, 前週比, 合計買残高, 前週比] (単位: 百万円)
-  const sellBalanceMil = valueRow[3];
-  const sellChangeMil = valueRow[4];
   const totalSellMil = valueRow[11];
+  const totalSellChangeMil = valueRow[12];
   const totalBuyMil = valueRow[13];
-  if (typeof sellBalanceMil !== "number" || typeof sellChangeMil !== "number") {
+  if (typeof totalSellMil !== "number" || typeof totalSellChangeMil !== "number") {
     throw new Error("信用売り残高の数値が想定形式と異なります");
   }
 
   // 信用倍率(貸借倍率) = 合計買残高 ÷ 合計売残高。株温計等で一般的に使われる定義に合わせる
-  const ratio = typeof totalBuyMil === "number" && typeof totalSellMil === "number" && totalSellMil > 0
-    ? totalBuyMil / totalSellMil
-    : null;
+  const ratio = typeof totalBuyMil === "number" && totalSellMil > 0 ? totalBuyMil / totalSellMil : null;
 
-  return { asOfDate, sellBalanceOku: sellBalanceMil / 100, sellChangeOku: sellChangeMil / 100, ratio };
+  // 残高表示も委託のみでなく合計(委託+自己)ベースにし、信用倍率と基準を揃える
+  return { asOfDate, sellBalanceOku: totalSellMil / 100, sellChangeOku: totalSellChangeMil / 100, ratio };
 }
 
 // JPXのデータは週次更新のため、頻繁な再取得を避けて半日キャッシュする
 async function fetchMarginBalanceCached() {
   const cache = caches.default;
-  const cacheKey = new Request("https://internal-cache.example/margin-balance-cache-key-v3");
+  const cacheKey = new Request("https://internal-cache.example/margin-balance-cache-key-v4");
   const cached = await cache.match(cacheKey);
   if (cached) return cached.json();
 
@@ -373,7 +371,7 @@ function marginRatioLevel(ratio) {
 function scoreMarginBuying(margin) {
   const oku = Math.round(margin.sellBalanceOku).toLocaleString("ja-JP");
   const chg = Math.round(margin.sellChangeOku).toLocaleString("ja-JP");
-  let detail = `信用売り残(委託) ${oku}億円(前週比${margin.sellChangeOku >= 0 ? "+" : ""}${chg}億円、${margin.asOfDate}申込み現在)`;
+  let detail = `信用売り残(合計) ${oku}億円(前週比${margin.sellChangeOku >= 0 ? "+" : ""}${chg}億円、${margin.asOfDate}申込み現在)`;
 
   // 評価は信用倍率(合計買残高÷合計売残高)のみで行う
   let score = 0;
@@ -748,7 +746,7 @@ export default {
 
     if (url.pathname === "/api/signal") {
       const cache = caches.default;
-      const cacheKey = new Request(url.origin + "/api/signal-cache-key-v5", request);
+      const cacheKey = new Request(url.origin + "/api/signal-cache-key-v6", request);
       const cached = await cache.match(cacheKey);
       if (cached) return cached;
 
